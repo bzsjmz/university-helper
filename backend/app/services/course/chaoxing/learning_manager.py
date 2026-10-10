@@ -88,12 +88,12 @@ def _as_float(value: Any, default: float, minimum: float, maximum: float) -> flo
     return max(minimum, min(maximum, parsed))
 
 
-def _as_int(value: Any, default: int, minimum: int, maximum: int) -> int:
+def _as_int(value: Any, default: int, minimum: int, maximum: int | None = None) -> int:
     try:
         parsed = int(value)
     except (TypeError, ValueError):
         return default
-    return max(minimum, min(maximum, parsed))
+    return max(minimum, min(maximum, parsed) if maximum is not None else parsed)
 
 
 def _parse_course_selector(raw: str) -> tuple[str, str | None, str | None]:
@@ -417,7 +417,6 @@ class ChaoxingLearningManager:
                 payload.get("concurrency", payload.get("jobs")),
                 default=4,
                 minimum=1,
-                maximum=16,
             ),
             "notopen_action": str(payload.get("unopened_strategy") or payload.get("notopen_action") or "retry")
             .strip()

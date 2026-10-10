@@ -159,15 +159,15 @@ export default function ConfigSection({
           </label>
           <input
             id="fanya-concurrency"
-            type="range"
+            type="number"
             min="1"
-            max="16"
             step="1"
             value={concurrency}
-            onChange={(event) => setConcurrency(toNum(event.target.value, 4))}
-            className="w-full"
+            onChange={(event) => setConcurrency(event.target.value === '' ? '' : Math.max(1, Math.trunc(toNum(event.target.value, 1))))}
+            onBlur={() => { if (concurrency === '') setConcurrency(1) }}
+            className="w-full rounded-xl border border-border bg-surface px-3 py-2"
           />
-          <p className="text-xs text-text-muted">并发越高越快，但过高可能触发风控，建议 3–6。</p>
+          <p className="text-xs text-text-muted">填写同时处理的章节数，可自行调整。</p>
         </div>
 
         <PillGroup

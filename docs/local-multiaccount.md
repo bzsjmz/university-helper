@@ -23,7 +23,8 @@ and are marked as having no recorded account.
 unset preserves the upstream default of 64; `0` removes the account-task
 limit; positive values set a capacity. Paused tasks occupy capacity. The
 deployment's container CPU/memory limits still apply. Chapter concurrency is
-configured separately for each task and defaults to 1 on this page.
+configured separately for each task and defaults to 1 on this page. It accepts
+positive integers without an application maximum, in both the UI and worker.
 
 Account credentials and task history persist. Running/paused worker threads
 do not survive a process restart: restart marks interrupted tasks as failed,

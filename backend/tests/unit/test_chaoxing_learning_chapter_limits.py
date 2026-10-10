@@ -80,6 +80,17 @@ def _log_messages(task):
     return [entry["message"] for entry in task["logs"]]
 
 
+def test_chapter_concurrency_above_16_reaches_worker_unchanged(worker, monkeypatch):
+    captured = {}
+    def initialize(common, tiku):
+        captured.update(common)
+        return FakeChaoxing()
+    monkeypatch.setattr(lm, 'init_chaoxing', initialize)
+    task, _ = worker(course_ids=['100_200_300'], concurrency=32)
+    assert task['status'] == 'completed'
+    assert captured['jobs'] == 32
+
+
 def test_limit_stops_the_course_at_the_chosen_chapter(worker):
     task, processed = worker(
         course_ids=["100_200_300", "101_201_301"],

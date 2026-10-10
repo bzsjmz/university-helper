@@ -28,7 +28,7 @@ class AccountTask(CourseStartRequest):
     platform: str = 'chaoxing'
     username: str = ''
     password: str = ''
-    concurrency: int = Field(default=1, ge=1, le=16)
+    concurrency: int = Field(default=1, ge=1)
     speed: float = Field(default=1.0, gt=0, le=4)
 
 
