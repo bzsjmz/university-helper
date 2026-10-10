@@ -167,3 +167,45 @@ def test_negative_or_non_finite_interval_uses_default(builder):
     expected = 3.0
     actual = provider.min_interval_seconds if isinstance(provider, AI) else provider.min_interval
     assert actual == expected
+
+
+@pytest.mark.parametrize('status', [401, 402, 403])
+def test_ai_switches_to_fallback_immediately_for_unusable_key(status):
+    provider, client = _build_ai(max_retries=3)
+    provider._keys = ('primary-test-key', 'fallback-test-key')
+    client.post.side_effect = [FakeResponse({'error': 'private response'}, status), _SUCCESS]
+    with patch('app.services.course.chaoxing.answer_providers.ai.time.sleep') as sleep:
+        assert provider._query(_QUESTION) == 'A'
+    assert [call.kwargs['headers']['Authorization'] for call in client.post.call_args_list] == [
+        'Bearer primary-test-key', 'Bearer fallback-test-key']
+    sleep.assert_not_called()
+    assert provider.key == 'test-key'  # no shared-key mutation
+
+
+def test_ai_primary_success_never_calls_fallback():
+    provider, client = _build_ai()
+    provider._keys = ('primary-test-key', 'fallback-test-key')
+    client.post.return_value = _SUCCESS
+    assert provider._query(_QUESTION) == 'A'
+    client.post.assert_called_once()
+    assert client.post.call_args.kwargs['headers']['Authorization'] == 'Bearer primary-test-key'
+
+
+@pytest.mark.parametrize('failure', [_FAILURE, FakeResponse({}, 429)])
+def test_ai_transient_failure_retries_primary_then_fallback_with_bounded_attempts(failure):
+    provider, client = _build_ai(max_retries=2)
+    provider._keys = ('primary-test-key', 'fallback-test-key')
+    client.post.side_effect = [failure, failure, _SUCCESS]
+    with patch('app.services.course.chaoxing.answer_providers.ai.time.sleep'):
+        assert provider._query(_QUESTION) == 'A'
+    assert [call.kwargs['headers']['Authorization'] for call in client.post.call_args_list] == [
+        'Bearer primary-test-key', 'Bearer primary-test-key', 'Bearer fallback-test-key']
+
+
+def test_ai_both_keys_fail_without_unbounded_retries():
+    provider, client = _build_ai(max_retries=2)
+    provider._keys = ('primary-test-key', 'fallback-test-key')
+    client.post.return_value = _FAILURE
+    with patch('app.services.course.chaoxing.answer_providers.ai.time.sleep'):
+        assert provider._query(_QUESTION) is None
+    assert client.post.call_count == 4

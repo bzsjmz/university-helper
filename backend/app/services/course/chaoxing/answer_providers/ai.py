@@ -147,6 +147,18 @@ class AI(Tiku):
         return [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_content}]
 
     def _invoke_completion(self, messages: list[dict]) -> str | None:
+        # Keep the selected key local to each request: concurrent questions
+        # must never mutate a shared self.key while another request is retrying.
+        keys = getattr(self, "_keys", None) or [self.key]
+        for index, key in enumerate(keys):
+            answer = self._invoke_completion_with_key(messages, key)
+            if answer is not None:
+                return answer
+            if index + 1 < len(keys):
+                logger.warning("AI优先 Key 调用失败，切换到回退 Key")
+        return None
+
+    def _invoke_completion_with_key(self, messages: list[dict], key: str) -> str | None:
         if not self._httpx_client:
             logger.error("AI题库 HTTP 客户端未初始化")
             return None
@@ -172,7 +184,7 @@ class AI(Tiku):
                     acquired = True
                 self._respect_interval()
                 headers = {
-                    "Authorization": f"Bearer {self.key}",
+                    "Authorization": f"Bearer {key}",
                     "Content-Type": "application/json",
                 }
                 payload = {
@@ -191,6 +203,11 @@ class AI(Tiku):
                 attempt_status_code = _safe_status_code(response.status_code)
                 if attempt_status_code != 200:
                     safe_status = attempt_status_code if attempt_status_code is not None else "unknown"
+                    if attempt_status_code in {401, 402, 403}:
+                        # Invalid credentials / insufficient balance cannot be
+                        # repaired by retrying the same key. Never log bodies.
+                        logger.warning(f"AI Key 不可用，HTTP {safe_status}")
+                        return None
                     raise RuntimeError(f"HTTP status {safe_status}")
 
                 data = response.json()
@@ -284,23 +301,35 @@ class AI(Tiku):
         endpoint = str(self._conf.get("endpoint") or server_endpoint).strip()
         model = str(self._conf.get("model") or os.environ.get("CHAOXING_AI_MODEL", "")).strip()
         key = str(self._conf.get("key") or "").strip()
+        keys = []
         if not endpoint or not model:
             raise ValueError("AI endpoint and model must be configured")
         if not key:
             # Never attach the server credential to a caller-selected endpoint.
             if not server_endpoint or endpoint != server_endpoint:
                 raise ValueError("Server AI key requires the configured server endpoint")
-            key_file = os.environ.get("CHAOXING_AI_KEY_FILE", "").strip()
-            if key_file:
-                try:
-                    key = Path(key_file).read_text(encoding="utf-8").strip()
-                except OSError:
-                    raise ValueError("AI API key file cannot be read") from None
-            if not key:
+            # Existing deployment key remains the fallback. An optional primary
+            # file can be populated independently, without exposing either key
+            # in task settings or the browser.
+            for variable in ("CHAOXING_AI_PRIMARY_KEY_FILE", "CHAOXING_AI_KEY_FILE"):
+                key_file = os.environ.get(variable, "").strip()
+                if key_file:
+                    try:
+                        candidate = Path(key_file).read_text(encoding="utf-8").strip()
+                    except OSError:
+                        raise ValueError("AI API key file cannot be read") from None
+                    if candidate and candidate not in keys:
+                        keys.append(candidate)
+            if not keys:
                 raise ValueError("AI API key has not been configured")
+            key = keys[0]
+        else:
+            # Explicit caller credentials never inherit server fallback keys.
+            keys = [key]
         self.endpoint = assert_public_endpoint(endpoint)
         # Keep the server key out of _conf: task payloads may be persisted.
         self.key = key
+        self._keys = tuple(keys)
         self.model = model
         raw_proxy = self._conf.get("http_proxy")
         self.http_proxy = assert_public_endpoint(raw_proxy) if raw_proxy else None

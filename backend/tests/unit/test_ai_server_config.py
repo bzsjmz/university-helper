@@ -76,3 +76,32 @@ def test_server_endpoint_still_rejects_private_addresses(server_config, monkeypa
     monkeypatch.setenv("CHAOXING_AI_ENDPOINT", "http://127.0.0.1/chat/completions")
     with pytest.raises(endpoint_security.UnsafeEndpointError):
         endpoint_security.validate_tiku_config({"provider": "AI"})
+
+
+def test_primary_key_precedes_existing_fallback_and_is_not_in_config(server_config, monkeypatch, tmp_path):
+    primary = tmp_path / 'primary'
+    primary.write_text('test-primary-key')
+    monkeypatch.setenv('CHAOXING_AI_PRIMARY_KEY_FILE', str(primary))
+    config = {'provider': 'AI'}
+    provider = make_provider(config)
+    assert provider._keys == ('test-primary-key', 'test-server-key')
+    assert provider.key == 'test-primary-key'
+    assert config == {'provider': 'AI'}
+    primary.write_text('')
+    assert make_provider(config)._keys == ('test-server-key',)
+    primary.write_text('test-server-key')
+    assert make_provider(config)._keys == ('test-server-key',)
+
+
+def test_caller_key_does_not_inherit_server_fallback(server_config, monkeypatch, tmp_path):
+    primary = tmp_path / 'primary'
+    primary.write_text('test-primary-key')
+    monkeypatch.setenv('CHAOXING_AI_PRIMARY_KEY_FILE', str(primary))
+    provider = make_provider({'provider': 'AI', 'key': 'caller-key'})
+    assert provider._keys == ('caller-key',)
+
+
+def test_unreadable_primary_file_is_reported_without_credentials(server_config, monkeypatch, tmp_path):
+    monkeypatch.setenv('CHAOXING_AI_PRIMARY_KEY_FILE', str(tmp_path / 'missing'))
+    with pytest.raises(ValueError, match='cannot be read'):
+        make_provider({'provider': 'AI'})
