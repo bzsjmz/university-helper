@@ -11,6 +11,7 @@ import {
 import { Card, StatusBadge, useRuntimeProfile } from '../components'
 import { getShuakeToken, getToken, setShuakeToken } from '../utils/auth'
 import { api } from '../utils/api'
+import TaskConsole from './TaskConsole'
 
 const SERVICE_DEFINITIONS = [
   {
@@ -86,6 +87,11 @@ const newestTaskRecord = (records, statuses) =>
   }, null)
 
 export default function Dashboard() {
+  const { isLocal } = useRuntimeProfile()
+  return isLocal ? <LegacyDashboard /> : <TaskConsole />
+}
+
+function LegacyDashboard() {
   const navigate = useNavigate()
   const { isLocal } = useRuntimeProfile()
   const [snapshot, setSnapshot] = useState({

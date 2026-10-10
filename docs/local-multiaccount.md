@@ -40,3 +40,26 @@ recreation, trusted server credentials, and frontend account-switch races.
 The database integration suite requires `MULTI_ACCOUNT_DB_TEST=1` and must
 only run against a dedicated disposable database. It deletes account rows
 in that database. Tests use dummy accounts and never contact real courses.
+
+## Server task console
+
+The server `/dashboard` page is a learning-account task console. It reads the
+owner-scoped account list and task snapshots every five seconds, with no
+overlapping polls. The desktop profile keeps the original service dashboard.
+
+The console shows account totals, running/paused task counts, failed records,
+account and status filters, account/course/task search, and every task's
+course/chapter progress. A selected task displays video progress and the last
+100 log entries. These counters describe program execution; platform completion
+has not been independently verified. Legacy task history is explicitly marked
+as having no recorded account.
+
+Pause, resume and confirmed stop target the individual task ID. Commands to
+different tasks are independent. A snapshot that began before a command is
+drained before requesting the post-command snapshot. Failed polling retains
+the last data, shows a stale-data message, and disables task controls until
+task synchronization succeeds. Account management and task creation remain on
+the Chaoxing page; the console links to it and preserves links to other services.
+
+This console is frontend-only and can be deployed by updating the web service
+without restarting backend worker threads.
