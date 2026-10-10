@@ -1,8 +1,10 @@
 import json
 import math
+import os
 import re
 import threading
 import time
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -278,16 +280,35 @@ class AI(Tiku):
         return self._invoke_completion(messages)
 
     def _init_tiku(self):
-        self.endpoint = assert_public_endpoint(self._conf["endpoint"])
-        self.key = self._conf["key"]
-        self.model = self._conf["model"]
+        server_endpoint = os.environ.get("CHAOXING_AI_ENDPOINT", "").strip()
+        endpoint = str(self._conf.get("endpoint") or server_endpoint).strip()
+        model = str(self._conf.get("model") or os.environ.get("CHAOXING_AI_MODEL", "")).strip()
+        key = str(self._conf.get("key") or "").strip()
+        if not endpoint or not model:
+            raise ValueError("AI endpoint and model must be configured")
+        if not key:
+            # Never attach the server credential to a caller-selected endpoint.
+            if not server_endpoint or endpoint != server_endpoint:
+                raise ValueError("Server AI key requires the configured server endpoint")
+            key_file = os.environ.get("CHAOXING_AI_KEY_FILE", "").strip()
+            if key_file:
+                try:
+                    key = Path(key_file).read_text(encoding="utf-8").strip()
+                except OSError:
+                    raise ValueError("AI API key file cannot be read") from None
+            if not key:
+                raise ValueError("AI API key has not been configured")
+        self.endpoint = assert_public_endpoint(endpoint)
+        # Keep the server key out of _conf: task payloads may be persisted.
+        self.key = key
+        self.model = model
         raw_proxy = self._conf.get("http_proxy")
         self.http_proxy = assert_public_endpoint(raw_proxy) if raw_proxy else None
         self.min_interval_seconds = _parse_non_negative_finite(
             self._conf.get("min_interval_seconds", _DEFAULT_MIN_INTERVAL_SECONDS),
             _DEFAULT_MIN_INTERVAL_SECONDS,
         )
-        self.timeout = float(self._conf.get("timeout", 30))
+        self.timeout = float(self._conf.get("timeout", os.environ.get("CHAOXING_AI_TIMEOUT_SECONDS", 30)))
         self.max_retries = _parse_attempt_count(self._conf.get("max_retries", _DEFAULT_MAX_RETRIES))
         self.retry_delay = _parse_non_negative_finite(
             self._conf.get("retry_delay", _DEFAULT_RETRY_DELAY),

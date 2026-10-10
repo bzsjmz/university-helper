@@ -1,0 +1,3 @@
+FROM ghcr.io/sweetcornna/university-helper-app:1.5.0
+COPY --chown=app:app backend/app/services/course/chaoxing/answer_providers/ai.py /srv/backend/app/services/course/chaoxing/answer_providers/ai.py
+COPY --chown=app:app backend/app/services/course/chaoxing/endpoint_security.py /srv/backend/app/services/course/chaoxing/endpoint_security.py

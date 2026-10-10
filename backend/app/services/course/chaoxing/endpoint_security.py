@@ -11,6 +11,7 @@ the request.
 from __future__ import annotations
 
 import ipaddress
+import os
 import socket
 from collections.abc import Mapping
 from urllib.parse import urlsplit
@@ -157,7 +158,8 @@ def validate_tiku_config(config: object) -> None:
 
     A missing SiliconFlow endpoint intentionally remains valid because that
     provider has a fixed public default.  TikuAdapter and AI have no safe
-    default, so selecting either requires a non-empty endpoint.  Proxy values
+    default, so selecting either requires a non-empty endpoint (AI can use the
+    server-configured endpoint). Proxy values
     are optional but, when present, use the same public HTTP(S) policy.
     """
     if config is None:
@@ -180,7 +182,9 @@ def validate_tiku_config(config: object) -> None:
     if "AI" in providers:
         ai_endpoint = _configured_value(config, "endpoint")
         if ai_endpoint is None:
-            raise UnsafeEndpointError
+            ai_endpoint = os.environ.get("CHAOXING_AI_ENDPOINT", "").strip()
+            if not ai_endpoint:
+                raise UnsafeEndpointError
         assert_public_endpoint(ai_endpoint)
     elif _configured_value(config, "endpoint") is not None:
         assert_public_endpoint(config["endpoint"])
