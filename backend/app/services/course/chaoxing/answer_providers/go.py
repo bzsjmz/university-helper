@@ -8,6 +8,12 @@ from loguru import logger
 from ..answer_base import Tiku
 
 
+# All accounts hit the same public service. Reserve request starts process-wide
+# and hold the gate through each call so independent instances cannot burst.
+_GO_GATE = threading.Lock()
+_GO_LAST_START = 0.0
+
+
 class TikuGo(Tiku):
     """GO题（网课小工具）题库实现，对接 https://q.icodef.com/wyn-nb 。
 
@@ -33,12 +39,12 @@ class TikuGo(Tiku):
 
     # -- throttle ---------------------------------------------------------
     def _sleep_for_next_request(self) -> None:
-        with self._request_lock:
-            now = time.time()
-            wait_time = max(0.0, self._last_request_time + self._min_interval - now)
-            self._last_request_time = now + wait_time
-        if wait_time > 0:
+        global _GO_LAST_START
+        now = time.monotonic()
+        wait_time = max(0.0, _GO_LAST_START + max(1.0, self._min_interval) - now)
+        if wait_time:
             time.sleep(wait_time)
+        _GO_LAST_START = time.monotonic()
 
     def _mark_request_finished(self) -> None:
         with self._request_lock:
@@ -47,13 +53,14 @@ class TikuGo(Tiku):
     # -- request / parse --------------------------------------------------
     def _request_question(self, question: str, attempt: int):
         try:
-            self._sleep_for_next_request()
-            res = requests.post(
-                self.api,
-                data={"question": question},
-                headers=self._headers,
-                timeout=self._timeout,
-            )
+            with _GO_GATE:
+                self._sleep_for_next_request()
+                res = requests.post(
+                    self.api,
+                    data={"question": question},
+                    headers=self._headers,
+                    timeout=self._timeout,
+                )
             self._mark_request_finished()
             return res
         except requests.exceptions.RequestException as e:

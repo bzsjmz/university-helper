@@ -1,4 +1,7 @@
 import json
+import hashlib
+import re
+from contextlib import contextmanager
 import os
 import shutil
 import tempfile
@@ -150,6 +153,49 @@ class CacheDAO:
                     logger.error(f"Failed to write cache atomically: {e}")
         except OSError as e:
             logger.error(f"Failed to write cache: {e}")
+
+    @staticmethod
+    def question_key(question: dict) -> str:
+        # Option order is part of identity: a cached letter cannot survive a
+        # shuffle. Keep question type separate even when the title is identical.
+        value = [question.get("type", ""), question.get("title", ""), question.get("options", [])]
+        return "question-v2:" + hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+
+    @contextmanager
+    def question_lock(self, question: dict, scope=None):
+        key = self.question_key(question) + hashlib.sha256(json.dumps(scope, sort_keys=True, default=str).encode()).hexdigest()
+        with self._lock:
+            flights = self._state.setdefault("flights", {})
+            entry = flights.setdefault(key, {"lock": threading.Lock(), "users": 0})
+            entry["users"] += 1
+        try:
+            with entry["lock"]:
+                yield entry
+        finally:
+            with self._lock:
+                entry["users"] -= 1
+                if not entry["users"]:
+                    flights.pop(key, None)
+
+    def get_question_cache(self, question: dict) -> str | None:
+        answer = self.get_cache(self.question_key(question))
+        if answer:
+            return answer
+        # Reuse legacy content only when it is an exact single option text.
+        # Never reuse an old letter with unknown option order or other types.
+        if question.get("type") != "single":
+            return None
+        legacy = self.get_cache(question.get("title", ""))
+        if not legacy or re.fullmatch(r"[A-Ha-h]+", legacy.strip()):
+            return None
+        options = question.get("options") or []
+        if isinstance(options, str):
+            options = options.splitlines()
+        texts = [re.sub(r"^[A-Za-z](?:[.、．,]\s*|\s+)", "", str(option)).strip() for option in options]
+        return legacy.strip() if legacy.strip() in texts else None
+
+    def add_question_cache(self, question: dict, answer: str) -> None:
+        self.add_cache(self.question_key(question), answer)
 
     def get_cache(self, question: str) -> str | None:
         # Serve from the in-memory snapshot (loaded once per file path) so a quiz

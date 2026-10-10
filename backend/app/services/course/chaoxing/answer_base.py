@@ -146,44 +146,58 @@ class Tiku:
         # 先过缓存。CacheDAO 现在共享进程级内存快照并在 add_cache 时写穿到磁盘，
         # 因此每题构造一个新实例的代价是 O(1)（不再每题重新读取/解析整个文件）。
         cache_dao = CacheDAO()
-        answer = cache_dao.get_cache(q_info["title"])
-        if answer:
-            logger.info(f"从缓存中获取答案：{q_info['title']} -> {answer}")
-            return answer.strip()
-        answer = self._query(q_info)
-        if answer:
-            answer = answer.strip()
-            logger.info(f"从{self.name}获取答案：{q_info['title']} -> {answer}")
+        with cache_dao.question_lock(q_info, self._conf or self.name) as flight:
+            if flight.get("miss"):
+                return None
+            answer = cache_dao.get_question_cache(q_info)
+            if answer:
+                logger.info(f"从缓存中获取答案：{q_info['title']} -> {answer}")
+                return answer.strip()
+            answer = self._query(q_info)
+            if answer:
+                answer = answer.strip()
+                logger.info(f"从{self.name}获取答案：{q_info['title']} -> {answer}")
 
-            q_type = q_info.get("type")
+                q_type = q_info.get("type")
 
-            # 对 AI / 硅基流动等大模型题库更宽松：对填空/单选/多选/未知题型，
-            # 只要有非空答案就直接使用并写入缓存，不再依赖 check_answer 的严格
-            # 类型判断，避免丢弃诸如"输入/输出"、"Babbage machine"这种正常答案。
-            # 但判断题必须先归一化映射到 true_list/false_list，否则一句完整的
-            # 句子（如"这道题表述是对的"）会在 judgement_select 里退化为随机选择，
-            # 而且会被缓存固化，导致判断题覆盖率静默变成随机。
-            from .answer_providers import AI, SiliconFlow
+                # 对 AI / 硅基流动等大模型题库更宽松：对填空/单选/多选/未知题型，
+                # 只要有非空答案就直接使用并写入缓存，不再依赖 check_answer 的严格
+                # 类型判断，避免丢弃诸如"输入/输出"、"Babbage machine"这种正常答案。
+                # 但判断题必须先归一化映射到 true_list/false_list，否则一句完整的
+                # 句子（如"这道题表述是对的"）会在 judgement_select 里退化为随机选择，
+                # 而且会被缓存固化，导致判断题覆盖率静默变成随机。
+                from .answer_providers import AI, SiliconFlow
 
-            if isinstance(self, (AI, SiliconFlow)):
-                if q_type == "judgement":
-                    normalized = self._normalize_judgement_answer(answer)
-                    if normalized is None:
-                        logger.info(f"从{self.name}获取到的判断题答案无法归一化为 正确/错误，已舍弃：{answer}")
-                        return None
-                    cache_dao.add_cache(q_info["title"], normalized)
-                    return normalized
-                cache_dao.add_cache(q_info["title"], answer)
-                return answer
+                if isinstance(self, (AI, SiliconFlow)):
+                    if q_type == "judgement":
+                        normalized = self._normalize_judgement_answer(answer)
+                        if normalized is None:
+                            logger.info(f"从{self.name}获取到的判断题答案无法归一化为 正确/错误，已舍弃：{answer}")
+                            flight["miss"] = True
+                            return None
+                        cache_dao.add_question_cache(q_info, normalized)
+                        return normalized
+                    cache_dao.add_question_cache(q_info, answer)
+                    return answer
 
-            if check_answer(answer, q_type, self):
-                cache_dao.add_cache(q_info["title"], answer)
-                return answer
-            logger.info(f"从{self.name}获取到的答案类型与题目类型不符，已舍弃")
+                if self._accept_bank_answer(answer, q_info):
+                    cache_dao.add_question_cache(q_info, answer)
+                    return answer
+                logger.info(f"从{self.name}获取到的答案类型与题目类型不符，已舍弃")
+                flight["miss"] = True
+                return None
+
+            logger.error(f"从{self.name}获取答案失败：{q_info['title']}")
+            flight["miss"] = True
             return None
 
-        logger.error(f"从{self.name}获取答案失败：{q_info['title']}")
-        return None
+    def _accept_bank_answer(self, answer: str, question: dict) -> bool:
+        if question.get("type") == "single":
+            from .answer_utils import _prepare_option_lines
+            options = [sub(r"^[A-Za-z](?:[.、．,]\s*|\s+)", "", option).strip() for option in _prepare_option_lines(question.get("options", []))]
+            if answer.strip() in options:
+                return True
+        return check_answer(answer, question.get("type"), self)
 
     def _normalize_judgement_answer(self, answer: str) -> str | None:
         """将（AI 返回的）判断题答案归一化为 true_list / false_list 中的标准值。
@@ -362,19 +376,23 @@ class TikuFallback(Tiku):
         q_info["title"] = sub(r"（\d+\.\d+分）$", "", q_info["title"])
 
         cache_dao = CacheDAO()
-        cached = cache_dao.get_cache(q_info["title"])
-        if cached:
-            logger.info(f"从缓存中获取答案：{q_info['title']} -> {cached}")
-            return cached.strip()
+        with cache_dao.question_lock(q_info, self._conf or self.name) as flight:
+            if flight.get("miss"):
+                return None
+            cached = cache_dao.get_question_cache(q_info)
+            if cached:
+                logger.info(f"从缓存中获取答案：{q_info['title']} -> {cached}")
+                return cached.strip()
 
-        answer = self._query(q_info)
-        if answer:
-            answer = answer.strip()
-            logger.info(f"从{self.name}获取答案：{q_info['title']} -> {answer}")
-            cache_dao.add_cache(q_info["title"], answer)
-            return answer
-        logger.error(f"从{self.name}获取答案失败：{q_info['title']}")
-        return None
+            answer = self._query(q_info)
+            if answer:
+                answer = answer.strip()
+                logger.info(f"从{self.name}获取答案：{q_info['title']} -> {answer}")
+                cache_dao.add_question_cache(q_info, answer)
+                return answer
+            logger.error(f"从{self.name}获取答案失败：{q_info['title']}")
+            flight["miss"] = True
+            return None
 
     @property
     def wants_concurrent_query(self) -> bool:
@@ -434,7 +452,7 @@ class TikuFallback(Tiku):
                 logger.info(f"{provider.name} 命中答案")
                 return answer
 
-            if check_answer(answer, q_type, provider):
+            if provider._accept_bank_answer(answer, q_info):
                 logger.info(f"{provider.name} 命中答案")
                 return answer
             logger.info(f"{provider.name} 返回答案类型与题目类型不符，回退到下一个题库")

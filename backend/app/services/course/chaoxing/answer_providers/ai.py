@@ -5,6 +5,7 @@ import re
 import threading
 import time
 from pathlib import Path
+from urllib.parse import urlsplit
 from typing import Any
 
 import httpx
@@ -64,6 +65,10 @@ def _safe_status_code(value: object) -> int | None:
     return None
 
 
+class _AnswerResponseError(Exception):
+    """A received answer is unusable; another paid generation is not a retry."""
+
+
 class AI(Tiku):
     """AI大模型答题实现，带重试与更鲁棒的解析"""
 
@@ -82,6 +87,7 @@ class AI(Tiku):
         self.max_retries: int = _DEFAULT_MAX_RETRIES
         self.retry_delay: float = _DEFAULT_RETRY_DELAY
         self.disable_ssl_verify: bool = False
+        self.max_output_tokens = 512
         self._interval_lock = threading.Lock()
         # 全局并发控制：限制同一 AI 客户端同时在请求中的题目数量
         self.max_active_requests: int = 3
@@ -151,7 +157,11 @@ class AI(Tiku):
         # must never mutate a shared self.key while another request is retrying.
         keys = getattr(self, "_keys", None) or [self.key]
         for index, key in enumerate(keys):
-            answer = self._invoke_completion_with_key(messages, key)
+            try:
+                answer = self._invoke_completion_with_key(messages, key)
+            except _AnswerResponseError:
+                logger.warning("AI响应无法使用，停止该题重试及备用 Key 调用")
+                return None
             if answer is not None:
                 return answer
             if index + 1 < len(keys):
@@ -190,7 +200,10 @@ class AI(Tiku):
                 payload = {
                     "model": self.model,
                     "messages": messages,
+                    "max_tokens": self.max_output_tokens,
                 }
+                if urlsplit(self.endpoint).hostname == "api.deepseek.com":
+                    payload["thinking"] = {"type": "disabled"}
                 response = self._httpx_client.post(
                     self.endpoint,
                     headers=headers,
@@ -211,6 +224,8 @@ class AI(Tiku):
                     raise RuntimeError(f"HTTP status {safe_status}")
 
                 data = response.json()
+                if data["choices"][0].get("finish_reason") == "length":
+                    raise _AnswerResponseError()
                 raw_content = data["choices"][0]["message"]["content"] or ""
 
                 # 去掉 <think> 和 </think> 标记本身，但保留其中的内容，以便从中提取 Answer JSON
@@ -218,7 +233,7 @@ class AI(Tiku):
                 base_text = (text_without_tags or "").strip()
                 if not base_text:
                     logger.warning("AI大模型返回内容为空（仅包含 <think> 标签或空白），将视为无答案处理")
-                    return None
+                    raise _AnswerResponseError()
 
                 answers: list[str] = []
 
@@ -241,7 +256,7 @@ class AI(Tiku):
                     # 优先按JSON解析；若失败，再尝试将单引号风格的字典转换为JSON
                     try:
                         payload = json.loads(json_candidate_stripped)
-                        answers = _ensure_answer_list(payload.get("Answer") or payload.get("answer"))
+                        answers = _ensure_answer_list((payload.get("Answer") or payload.get("answer")) if isinstance(payload, dict) else payload if isinstance(payload, list) else None)
                     except json.JSONDecodeError:
                         payload = None
                         candidate_fixed = json_candidate_stripped
@@ -253,7 +268,7 @@ class AI(Tiku):
                             except Exception:
                                 payload = None
                         if payload is not None:
-                            answers = _ensure_answer_list(payload.get("Answer") or payload.get("answer"))
+                            answers = _ensure_answer_list((payload.get("Answer") or payload.get("answer")) if isinstance(payload, dict) else payload if isinstance(payload, list) else None)
                         else:
                             logger.warning("AI大模型返回内容不是标准JSON，将按纯文本处理")
                             answers = _ensure_answer_list(base_text)
@@ -266,9 +281,14 @@ class AI(Tiku):
 
                 if not answers:
                     logger.warning("AI大模型返回空答案，将视为无答案处理")
-                    return None
+                    raise _AnswerResponseError()
                 return "\n".join(answers).strip()
             except Exception as exc:
+                if attempt_status_code == 200:
+                    raise _AnswerResponseError() from None
+                # Only transport/server/rate-limit failures warrant retries.
+                if attempt_status_code is not None and attempt_status_code != 429 and attempt_status_code < 500:
+                    raise _AnswerResponseError() from None
                 last_error_type = type(exc).__name__
                 if attempt_status_code == 429:
                     cool_down = max(min_interval_seconds * 2, 5)
@@ -337,6 +357,7 @@ class AI(Tiku):
             self._conf.get("min_interval_seconds", _DEFAULT_MIN_INTERVAL_SECONDS),
             _DEFAULT_MIN_INTERVAL_SECONDS,
         )
+        self.max_output_tokens = min(4096, _parse_attempt_count(self._conf.get("max_output_tokens", 512), 512))
         self.timeout = float(self._conf.get("timeout", os.environ.get("CHAOXING_AI_TIMEOUT_SECONDS", 30)))
         self.max_retries = _parse_attempt_count(self._conf.get("max_retries", _DEFAULT_MAX_RETRIES))
         self.retry_delay = _parse_non_negative_finite(
