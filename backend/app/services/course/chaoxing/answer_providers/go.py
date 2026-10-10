@@ -6,6 +6,7 @@ import requests
 from loguru import logger
 
 from ..answer_base import Tiku
+from ..api_usage import record_response
 
 
 # All accounts hit the same public service. Reserve request starts process-wide
@@ -56,12 +57,18 @@ class TikuGo(Tiku):
         try:
             with _GO_GATE:
                 self._sleep_for_next_request()
-                res = requests.post(
-                    self.api,
-                    data={"question": question},
-                    headers=self._headers,
-                    timeout=self._timeout,
-                )
+                request_started = time.monotonic()
+                try:
+                    res = requests.post(
+                        self.api,
+                        data={"question": question},
+                        headers=self._headers,
+                        timeout=self._timeout,
+                    )
+                except Exception:
+                    record_response("GO", "none", attempt, request_started)
+                    raise
+                record_response("GO", "none", attempt, request_started, res)
                 # Set the cooldown before releasing the process-wide gate, so
                 # another account cannot start while this response is parsed.
                 throttled = res.status_code == 429

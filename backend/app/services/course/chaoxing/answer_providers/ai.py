@@ -12,6 +12,7 @@ import httpx
 from loguru import logger
 
 from ..answer_base import Tiku
+from ..api_usage import record_response
 from ..answer_utils import (
     _clean_option_prefix,
     _ensure_answer_list,
@@ -158,7 +159,7 @@ class AI(Tiku):
         keys = getattr(self, "_keys", None) or [self.key]
         for index, key in enumerate(keys):
             try:
-                answer = self._invoke_completion_with_key(messages, key)
+                answer = self._invoke_completion_with_key(messages, key, "primary" if index == 0 else "fallback")
             except _AnswerResponseError:
                 logger.warning("AI响应无法使用，停止该题重试及备用 Key 调用")
                 return None
@@ -168,7 +169,7 @@ class AI(Tiku):
                 logger.warning("AI优先 Key 调用失败，切换到回退 Key")
         return None
 
-    def _invoke_completion_with_key(self, messages: list[dict], key: str) -> str | None:
+    def _invoke_completion_with_key(self, messages: list[dict], key: str, role: str = "primary") -> str | None:
         if not self._httpx_client:
             logger.error("AI题库 HTTP 客户端未初始化")
             return None
@@ -204,12 +205,18 @@ class AI(Tiku):
                 }
                 if urlsplit(self.endpoint).hostname == "api.deepseek.com":
                     payload["thinking"] = {"type": "disabled"}
-                response = self._httpx_client.post(
-                    self.endpoint,
-                    headers=headers,
-                    json=payload,
-                    follow_redirects=False,
-                )
+                request_started = time.monotonic()
+                try:
+                    response = self._httpx_client.post(
+                        self.endpoint,
+                        headers=headers,
+                        json=payload,
+                        follow_redirects=False,
+                    )
+                except Exception:
+                    record_response("AI", role, attempt, request_started)
+                    raise
+                record_response("AI", role, attempt, request_started, response)
                 if acquired:
                     sem.release()
                     acquired = False
