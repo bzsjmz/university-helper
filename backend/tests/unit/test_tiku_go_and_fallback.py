@@ -8,6 +8,15 @@ normalization.
 
 from unittest.mock import patch
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def reset_go_shared_clock(monkeypatch):
+    from app.services.course.chaoxing.answer_providers import go
+    monkeypatch.setattr(go, "_GO_LAST_START", 0.0)
+    monkeypatch.setattr(go, "_GO_NOT_BEFORE", 0.0)
+
 
 class FakeResp:
     def __init__(self, json_data, status=200):
@@ -139,9 +148,9 @@ def test_tikugo_init_invalid_values_keep_defaults():
         }
     )
     go.init_tiku()
-    assert go._min_interval == 1.0
-    assert go._retry_times == 3
-    assert go._retry_backoff == 1.2
+    assert go._min_interval == 3.0
+    assert go._retry_times == 4
+    assert go._retry_backoff == 15.0
     assert go._headers["Authorization"] == ""  # go_authorization optional
 
 

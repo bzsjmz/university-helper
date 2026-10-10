@@ -12,6 +12,7 @@ from ..answer_base import Tiku
 # and hold the gate through each call so independent instances cannot burst.
 _GO_GATE = threading.Lock()
 _GO_LAST_START = 0.0
+_GO_NOT_BEFORE = 0.0
 
 
 class TikuGo(Tiku):
@@ -32,16 +33,16 @@ class TikuGo(Tiku):
         }
         self._request_lock = threading.Lock()
         self._last_request_time = 0.0
-        self._min_interval = 1.0
-        self._retry_times = 3
-        self._retry_backoff = 1.2
+        self._min_interval = 3.0
+        self._retry_times = 4
+        self._retry_backoff = 15.0
         self._timeout = 15
 
     # -- throttle ---------------------------------------------------------
     def _sleep_for_next_request(self) -> None:
         global _GO_LAST_START
         now = time.monotonic()
-        wait_time = max(0.0, _GO_LAST_START + max(1.0, self._min_interval) - now)
+        wait_time = max(0.0, max(_GO_LAST_START + max(3.0, self._min_interval), _GO_NOT_BEFORE) - now)
         if wait_time:
             time.sleep(wait_time)
         _GO_LAST_START = time.monotonic()
@@ -61,6 +62,21 @@ class TikuGo(Tiku):
                     headers=self._headers,
                     timeout=self._timeout,
                 )
+                # Set the cooldown before releasing the process-wide gate, so
+                # another account cannot start while this response is parsed.
+                throttled = res.status_code == 429
+                if not throttled and res.status_code == 200:
+                    try:
+                        body = res.json()
+                        if isinstance(body, dict):
+                            text = str(body.get("data", "")) + str(body.get("msg", ""))
+                            throttled = any(word in text for word in ("流控限制", "速度太快", "并发限制", "忙不过来"))
+                    except (ValueError, TypeError):
+                        pass
+                if throttled:
+                    global _GO_NOT_BEFORE
+                    cooldown = min(60.0, 15.0 * 2 ** min(attempt - 1, 2))
+                    _GO_NOT_BEFORE = max(_GO_NOT_BEFORE, time.monotonic() + cooldown)
             self._mark_request_finished()
             return res
         except requests.exceptions.RequestException as e:
@@ -69,6 +85,8 @@ class TikuGo(Tiku):
             return None
 
     def _parse_response(self, res):
+        if res.status_code == 429:
+            return {"code": 0, "answer": "", "msg": "HTTP 429", "is_throttled": True}
         if res.status_code != 200:
             logger.error(f"{self.name}查询失败: 状态码 {res.status_code}, 响应: {res.text}")
             return None
@@ -144,10 +162,13 @@ class TikuGo(Tiku):
             msg = parsed["msg"]
             is_throttled = parsed["is_throttled"]
 
-            if code != 1:
-                if is_throttled and attempt < self._retry_times:
-                    self._sleep_retry(attempt, "触发流控")
+            if is_throttled:
+                if attempt < self._retry_times:
+                    self._sleep_retry(attempt, "触发流控", include_min_interval=True)
                     continue
+                return None
+
+            if code != 1:
                 logger.info(f"{self.name}未命中或失败: {msg or '未知错误'}")
                 return None
 

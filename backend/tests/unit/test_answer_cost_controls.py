@@ -141,6 +141,7 @@ def test_deepseek_specific_parameter_is_not_sent_to_other_providers(monkeypatch)
 def test_go_request_gate_is_shared_across_instances(monkeypatch):
     clock = [100.0]; starts = []
     monkeypatch.setattr(go_module, '_GO_LAST_START', 0.0)
+    monkeypatch.setattr(go_module, '_GO_NOT_BEFORE', 0.0)
     monkeypatch.setattr(go_module.time, 'monotonic', lambda: clock[0])
     monkeypatch.setattr(go_module.time, 'sleep', lambda seconds: clock.__setitem__(0, clock[0] + seconds))
     def post(*args, **kwargs):
@@ -148,10 +149,44 @@ def test_go_request_gate_is_shared_across_instances(monkeypatch):
     monkeypatch.setattr(go_module.requests, 'post', post)
     for provider in (TikuGo(), TikuGo()):
         provider._request_question('synthetic', 1)
-    assert starts == [100.0, 101.0]
+    assert starts == [100.0, 103.0]
 
 
 def test_unlabelled_option_text_is_not_truncated(cache):
     provider, go, ai = chain('Paris, France')
     assert provider.query(question(options=['Paris, France', 'London'])) == 'Paris, France'
     ai._query.assert_not_called()
+
+
+@pytest.mark.parametrize('status,body', [(429, {}), (200, {'code': 0, 'msg': '流控限制', 'data': ''}),
+                                       (200, {'code': 1, 'msg': '并发限制', 'data': '提示信息'})])
+def test_go_throttle_cools_down_all_accounts_before_another_request(monkeypatch, status, body):
+    clock = [100.0]; starts = []
+    monkeypatch.setattr(go_module, '_GO_LAST_START', 0.0)
+    monkeypatch.setattr(go_module, '_GO_NOT_BEFORE', 0.0)
+    monkeypatch.setattr(go_module.time, 'monotonic', lambda: clock[0])
+    monkeypatch.setattr(go_module.time, 'sleep', lambda seconds: clock.__setitem__(0, clock[0] + seconds))
+    responses = [Mock(status_code=status), Mock(status_code=200)]
+    responses[0].json.return_value = body
+    responses[1].json.return_value = {'code': 1, 'data': '答案', 'msg': ''}
+    def post(*args, **kwargs):
+        starts.append(clock[0]); return responses[len(starts) - 1]
+    monkeypatch.setattr(go_module.requests, 'post', post)
+    first, second = TikuGo(), TikuGo()
+    response = first._request_question('synthetic', 1)
+    assert first._parse_response(response)['is_throttled']
+    second._request_question('synthetic', 1)
+    assert starts == [100.0, 115.0]
+
+
+def test_go_defaults_are_slower_and_retry_http_429_before_ai(monkeypatch):
+    go = TikuGo()
+    assert go._min_interval == 3 and go._retry_times == 4 and go._retry_backoff == 15
+    throttled = Mock(status_code=429)
+    success = Mock(status_code=200)
+    success.json.return_value = {'code': 1, 'data': '答案', 'msg': ''}
+    go._request_question = Mock(side_effect=[throttled, success])
+    go._sleep_retry = Mock()
+    assert go._query_once('synthetic') == '答案'
+    assert go._request_question.call_count == 2
+    go._sleep_retry.assert_called_once_with(1, '触发流控', include_min_interval=True)
