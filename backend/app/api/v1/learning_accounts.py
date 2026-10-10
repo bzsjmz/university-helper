@@ -1,4 +1,7 @@
 import asyncio
+import json
+
+from app.core.credential_crypto import encrypt_str, decrypt_str
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -111,6 +114,11 @@ async def start_task(account_id: str, request: AccountTask, owner: str = Depends
         with managed_accounts.lock(owner, account_id):
             row, username, password = managed_accounts.credentials(owner, account_id)
             payload = request.model_dump()
+            config = request.model_dump(exclude={"username", "password"})
+            ciphertext = encrypt_str(json.dumps(config))
+            if not ciphertext.startswith("fernet:"):
+                raise HTTPException(503, "Credential encryption is required")
+            payload["_restart_config"] = ciphertext
             payload.update(platform='chaoxing', username=username, password=password,
                            account_id=account_id, account_key=row['account_key'],
                            account_label=row['account_label'], account_name=row['label'])
@@ -122,3 +130,20 @@ async def start_task(account_id: str, request: AccountTask, owner: str = Depends
     except UnsafeEndpointError:
         raise HTTPException(422, 'Invalid answer-provider endpoint configuration') from None
     return {'task_id': task_id, 'status': 'started', 'message': 'Task started'}
+
+
+@router.post('/tasks/{task_id}/restart')
+async def restart_task(task_id: str, owner: str = Depends(get_current_user_id)):
+    try:
+        account_id, ciphertext = await asyncio.to_thread(_get_learning_manager().restart_config, str(owner), task_id)
+    except KeyError:
+        raise HTTPException(404, 'Task not found') from None
+    except TaskAdmissionError as exc:
+        raise HTTPException(exc.status_code, exc.detail) from None
+    if not account_id or not ciphertext:
+        raise HTTPException(409, 'Old task has no saved configuration; select courses and settings again')
+    try:
+        request = AccountTask.model_validate(json.loads(decrypt_str(ciphertext)))
+    except Exception:
+        raise HTTPException(409, 'Saved configuration unavailable; select courses and settings again') from None
+    return await start_task(account_id, request, owner)

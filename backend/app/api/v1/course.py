@@ -318,6 +318,18 @@ async def get_course_logs(
     }
 
 
+@router.delete("/task/{task_id}")
+async def delete_course_task(task_id: str, current_user: dict = Depends(get_current_user)):
+    try:
+        removed = await _run_blocking(_get_learning_manager().delete_task,
+                                      user_id=_current_user_id(current_user), task_id=task_id)
+    except TaskAdmissionError as exc:
+        raise HTTPException(exc.status_code, exc.detail) from None
+    if not removed:
+        raise HTTPException(404, "Task not found")
+    return {"status": "success", "message": "Task record deleted"}
+
+
 @router.post("/task/{task_id}/pause")
 async def pause_course_task(task_id: str, current_user: dict = Depends(get_current_user)):
     user_id = _current_user_id(current_user)

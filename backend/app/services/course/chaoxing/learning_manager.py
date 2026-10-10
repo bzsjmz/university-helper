@@ -172,6 +172,7 @@ class ChaoxingLearningManager:
         self._lock = threading.Lock()
         self._tasks: dict[str, dict[str, Any]] = {}
         self._loaded_task_users: set[str] = set()
+        self._deleted_tasks: set[str] = set()
         self._restore_tasks_from_store()
 
     def start_task(self, user_id: str, payload: dict[str, Any]) -> str:
@@ -232,6 +233,7 @@ class ChaoxingLearningManager:
                 "updated_at": now,
                 "logs": [],
                 "_log_cursor": 0,
+                "_restart_config": payload.get("_restart_config"),
                 "_pause_event": pause_event,
                 "_stop_event": stop_event,
             }
@@ -265,14 +267,14 @@ class ChaoxingLearningManager:
             cleanup_task_records(self._tasks)
             task = self._tasks.get(normalized_task_id)
             if task and str(task.get("user_id")) == normalized_user_id:
-                return {k: v for k, v in task.items() if not k.startswith("_")}
+                return self._task_public_payload(task)
 
         self._load_task_from_store(normalized_user_id, normalized_task_id)
         with self._lock:
             task = self._tasks.get(normalized_task_id)
             if not task or str(task.get("user_id")) != normalized_user_id:
                 return None
-            return {k: v for k, v in task.items() if not k.startswith("_")}
+            return self._task_public_payload(task)
 
     def list_tasks(self, user_id: str) -> list[dict[str, Any]]:
         self._ensure_tasks_loaded_for_user(user_id)
@@ -396,6 +398,41 @@ class ChaoxingLearningManager:
             task["updated_at"] = _utc_now_iso()
         self._append_task_log(task_id, "Task cancellation requested", "warning")
         return {"status": "cancelling", "message": "Task cancellation requested"}
+
+    def restart_config(self, user_id: str, task_id: str) -> tuple[str, str | None]:
+        if self.get_task(user_id, task_id) is None:
+            raise KeyError("Task not found")
+        with self._lock:
+            task = self._tasks.get(task_id)
+            if not task or str(task.get("user_id")) != str(user_id):
+                raise KeyError("Task not found")
+            if is_active_status(task.get("status")):
+                raise TaskAlreadyActiveError()
+            return str(task.get("account_id") or ""), task.get("_restart_config")
+
+    def delete_task(self, user_id: str, task_id: str) -> bool:
+        if self.get_task(user_id, task_id) is None:
+            return False
+        # Hold the registry lock while the final reserved write drains. No new
+        # snapshots or store reloads may resurrect the deleted terminal task.
+        with self._lock:
+            task = self._tasks.get(task_id)
+            if not task or str(task.get("user_id")) != str(user_id):
+                return False
+            if is_active_status(task.get("status")):
+                raise TaskAlreadyActiveError()
+            sequencer = task.get("_persist_sequencer")
+            def remove():
+                task_store.delete_task(LEARNING_TASK_KIND, task_id, str(user_id))
+            if isinstance(sequencer, _TaskPersistSequencer):
+                sequencer.run(sequencer.reserve(), remove)
+            else:
+                remove()
+            self._tasks.pop(task_id, None)
+            if not hasattr(self, "_deleted_tasks"):
+                self._deleted_tasks = set()
+            self._deleted_tasks.add(task_id)
+            return True
 
     def _run_task_worker(self, task_id: str, user_id: str, payload: dict[str, Any]) -> None:
         username = str(payload.get("username") or "").strip()
@@ -875,7 +912,8 @@ class ChaoxingLearningManager:
 
     @staticmethod
     def _task_public_payload(task: dict[str, Any]) -> dict[str, Any]:
-        return {k: v for k, v in task.items() if not str(k).startswith("_")}
+        return {**{k: v for k, v in task.items() if not str(k).startswith("_")},
+                "can_restart": bool(task.get("account_id") and task.get("_restart_config"))}
 
     @staticmethod
     def _default_progress() -> dict[str, Any]:
@@ -906,6 +944,8 @@ class ChaoxingLearningManager:
             task["_last_progress_persist_ts"] = now
 
         snapshot = self._task_public_payload(task)
+        if task.get("_restart_config"):
+            snapshot["_restart_config"] = task["_restart_config"]
         sequencer = task.get("_persist_sequencer")
         if not isinstance(sequencer, _TaskPersistSequencer):
             sequencer = _TaskPersistSequencer()
@@ -994,7 +1034,7 @@ class ChaoxingLearningManager:
             return False
 
         with self._lock:
-            if task_id in self._tasks:
+            if task_id in self._tasks or task_id in getattr(self, "_deleted_tasks", set()):
                 return False
 
         current_time = now or _utc_now_iso()
@@ -1037,7 +1077,7 @@ class ChaoxingLearningManager:
         task["_log_cursor"] = 0
 
         with self._lock:
-            if task_id in self._tasks:
+            if task_id in self._tasks or task_id in getattr(self, "_deleted_tasks", set()):
                 return False
             self._tasks[task_id] = task
 

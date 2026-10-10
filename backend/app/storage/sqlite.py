@@ -200,6 +200,17 @@ class _SqliteTaskStore:
             logger.exception("sqlite upsert_task failed: kind=%s task_id=%s", task_kind, task_id)
             return False
 
+    def delete_task(self, task_kind: str, task_id: str, user_id: str) -> bool:
+        if not self._usable or self.ensure_tables() is not True:
+            raise RuntimeError("Task storage unavailable")
+        with self._write_lock:
+            cur = self._conn.execute("DELETE FROM course_task_store WHERE task_kind=? AND task_id=? AND user_id=?",
+                                     (task_kind, task_id, str(user_id)))
+            deleted = cur.rowcount > 0
+            cur.close()
+            self._conn.commit()
+            return deleted
+
     def get_task(self, task_kind: str, task_id: str, user_id: str | None = None) -> dict[str, Any] | None:
         if not self._usable:
             return None

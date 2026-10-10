@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import { api } from '../utils/api'
 import { StatusBadge } from '../components'
 import { CARD, getCourseId } from './chaoxing-fanya/utils'
@@ -12,7 +13,8 @@ const ACTIVE = new Set(['pending', 'started', 'running', 'paused', 'cancelling',
 
 export default function ManagedChaoxing() {
   const [accounts, setAccounts] = useState([])
-  const [accountId, setAccountId] = useState('')
+  const location = useLocation()
+  const [accountId, setAccountId] = useState(location.state?.accountId || '')
   const [draft, setDraft] = useState({ label: '', username: '', password: '' })
   const [tasks, setTasks] = useState([])
   const [taskId, setTaskId] = useState('')
@@ -22,7 +24,7 @@ export default function ManagedChaoxing() {
   const [expanded, setExpanded] = useState(new Set())
   const [chapterLimits, setChapterLimits] = useState({})
   const [error, setError] = useState('')
-  const [notice, setNotice] = useState('')
+  const [notice, setNotice] = useState(location.state?.restartSetup ? '请选择课程和参数后启动。平台已完成的内容会跳过；旧任务记录会保留。' : '')
   const [loading, setLoading] = useState(false)
   const [courseLoading, setCourseLoading] = useState(false)
   const [adding, setAdding] = useState(false)

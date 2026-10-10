@@ -75,6 +75,9 @@ def _decrypt_sensitive(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 class TaskStore:
+    def delete_task(self, task_kind: str, task_id: str, user_id: str) -> bool:
+        return get_storage().tasks.delete_task(task_kind, task_id, user_id)
+
     def ensure_tables(self) -> bool:
         try:
             return get_storage().tasks.ensure_tables()

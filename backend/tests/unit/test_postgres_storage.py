@@ -238,3 +238,15 @@ def test_probe_ping_true_on_success(monkeypatch):
 def test_probe_ping_false_on_failure(monkeypatch):
     monkeypatch.setattr(pg, "get_db_session", lambda: (_ for _ in ()).throw(RuntimeError("down")))
     assert PostgresStorage().probe.ping() is False
+
+
+def test_delete_is_owner_and_kind_scoped(monkeypatch):
+    store = PostgresStorage().tasks
+    monkeypatch.setattr(store, 'ensure_tables', lambda: True)
+    cur = _FakeCursor([])
+    cur.rowcount = 1
+    _patch_session(monkeypatch, cur)
+    assert store.delete_task('learning', 'task', 'owner')
+    sql, params = cur.executed[0]
+    assert 'WHERE task_kind=%s AND task_id=%s AND user_id=%s' in sql
+    assert params == ('learning', 'task', 'owner')

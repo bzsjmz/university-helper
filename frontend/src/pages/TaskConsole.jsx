@@ -50,6 +50,7 @@ export default function TaskConsole() {
   const inFlight = useRef(null)
   const pendingRef = useRef(new Set())
   const generation = useRef(0)
+  const detailRef = useRef(null)
 
   const refresh = useCallback(() => {
     if (inFlight.current) return inFlight.current
@@ -105,9 +106,13 @@ export default function TaskConsole() {
     setPending(previous => ({ ...previous, [task.task_id]: action }))
     setActionError('')
     try {
-      await api(`/course/task/${encodeURIComponent(task.task_id)}/${action}`, { method: 'POST' })
+      const response = action === 'restart'
+        ? await api(`/learning-accounts/tasks/${encodeURIComponent(task.task_id)}/restart`, { method: 'POST' })
+        : await api(`/course/task/${encodeURIComponent(task.task_id)}${action === 'delete' ? '' : `/${action}`}`, { method: action === 'delete' ? 'DELETE' : 'POST' })
+      if (response.task_id) setSelectedId(response.task_id)
+      if (action === 'delete') setSelectedId(previous => previous === task.task_id ? '' : previous)
       if (generation.current !== current) return
-      setNotice(`${title(task, accounts)}：${{ pause: '暂停', resume: '继续', stop: '停止' }[action]}请求已发送`)
+      setNotice(`${title(task, accounts)}：${{ pause: '暂停', resume: '继续', stop: '停止', restart: '重新启动', delete: '删除记录' }[action]}请求已发送`)
       // Drain a snapshot that began before the mutation, then query again.
       if (inFlight.current) await inFlight.current
       if (generation.current === current) await refresh()
@@ -222,18 +227,29 @@ export default function TaskConsole() {
             <p className="mt-3 text-xs text-text-muted">失败课程 {toNum(progress.failed)} · 更新 {time(task.updated_at)}</p>
             <p className="mt-1 truncate text-xs text-text-muted" title={task.task_id}>任务 {task.task_id}</p>
             <div className="mt-4 flex flex-wrap gap-2">
-              <button type="button" onClick={() => setSelectedId(task.task_id)} className="rounded-lg bg-primary/10 px-3 py-2 text-sm text-primary">查看详情</button>
+              <button type="button" onClick={() => { setSelectedId(task.task_id); detailRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }); detailRef.current?.focus({ preventScroll: true }) }} className="rounded-lg bg-primary/10 px-3 py-2 text-sm text-primary">查看详情</button>
               <button type="button" disabled={busy || task.status !== 'running'} onClick={() => { void control(task, 'pause') }} className="rounded-lg border border-border px-3 py-2 text-sm disabled:opacity-40">暂停</button>
               <button type="button" disabled={busy || task.status !== 'paused'} onClick={() => { void control(task, 'resume') }} className="rounded-lg border border-border px-3 py-2 text-sm disabled:opacity-40">继续</button>
               <button type="button" disabled={busy || !ACTIVE.has(task.status) || ['cancelling', 'stopping'].includes(task.status)} onClick={() => {
                 if (window.confirm(`停止 ${name} 的任务？`)) void control(task, 'stop')
               }} className="rounded-lg border border-danger/30 px-3 py-2 text-sm text-danger disabled:opacity-40">停止</button>
+              {FINISHED.has(task.status) && <>
+                <button type="button" disabled={busy || !accounts.some(account => account.id === task.account_id)} onClick={() => {
+                  if (task.can_restart) {
+                    if (window.confirm(`按原配置重新启动 ${name} 的任务？将读取平台当前进度并跳过已完成内容。`)) void control(task, 'restart')
+                  } else navigate('/chaoxing-fanya', { state: { accountId: task.account_id, restartSetup: true } })
+                }} className="rounded-lg border border-primary/30 px-3 py-2 text-sm text-primary disabled:opacity-40">{task.can_restart ? '重新启动' : '重新配置并启动'}</button>
+                <button type="button" disabled={busy} onClick={() => {
+                  if (window.confirm(`删除 ${name} 的这条任务记录？保存的账号和平台学习进度会保留。`)) void control(task, 'delete')
+                }} className="rounded-lg border border-danger/30 px-3 py-2 text-sm text-danger disabled:opacity-40">删除记录</button>
+              </>}
             </div>
           </Card>
         })}</div>
-        {selected && <section aria-label="所选任务详情" className="space-y-3">
+        {selected && <section ref={detailRef} tabIndex={-1} aria-label="所选任务详情" className="scroll-mt-24 space-y-3">
           <h2 className="text-xl font-bold">任务详情 · {title(selected, accounts)}</h2>
-          {selected.message && <p className="text-sm text-text-muted">{selected.message}</p>}
+          {FINISHED.has(selected.status) && <p className="text-sm text-text-muted">此任务已结束。{selected.can_restart ? '可在任务卡片按原配置重新启动，平台已完成内容会跳过。' : '旧记录未保存启动配置，请在任务卡片选择“重新配置并启动”，重新选择课程和参数。'}删除记录只清除本地历史。</p>}
+          {selected.message && <p className="text-sm text-text-muted">{selected.message === 'Task interrupted due to service restart' ? '服务重启中断了此任务，可重新配置并启动。' : selected.message}</p>}
           <TaskControlSection taskId={selected.task_id} taskStatus={selected} statusText={selected.status} showStartButton={false}
             controlTask={action => control(selected, action)} controlLoading={{ pause: Boolean(pending[selected.task_id] || errors.tasks), resume: Boolean(pending[selected.task_id] || errors.tasks), stop: Boolean(pending[selected.task_id] || errors.tasks) }} />
           <p className="text-xs text-text-muted">显示最近 100 条日志</p><LogSection logs={(selected.logs || []).slice(-100)} />

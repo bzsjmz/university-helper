@@ -121,6 +121,7 @@ def test_learning_login_failure_does_not_expire_management_login(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_start_uses_stored_credentials_and_trusted_account_identity(monkeypatch):
+    monkeypatch.setattr(api, 'encrypt_str', lambda value: 'fernet:test-config')
     store = ManagedAccounts()
     store.credentials = lambda owner, account: ({'account_key': 'stored-key', 'account_label': 'masked', 'label': 'A'}, 'stored-user', 'stored-password')
     instance = Mock()
@@ -134,3 +135,89 @@ async def test_start_uses_stored_credentials_and_trusted_account_identity(monkey
     assert value['username'] == 'stored-user' and value['password'] == 'stored-password'
     assert value['account_id'] == 'a' and value['account_key'] == 'stored-key'
     assert value['concurrency'] == 1
+
+
+def test_config_is_persisted_but_never_exposed(monkeypatch):
+    instance = manager(monkeypatch)
+    task_id = instance.start_task('owner', {**payload('a'), '_restart_config': 'fernet:encrypted-settings'})
+    snapshot = instance._persist_task_state.call_args.args[0]
+    assert snapshot['_restart_config'] == 'fernet:encrypted-settings'
+    assert '_restart_config' not in instance.get_task('owner', task_id)
+    assert instance.get_task('owner', task_id)['can_restart'] is True
+    restored = manager(monkeypatch)
+    restored._merge_task_from_store(snapshot)
+    assert restored.restart_config('owner', task_id) == ('a', 'fernet:encrypted-settings')
+    with pytest.raises(KeyError): restored.restart_config('stranger', task_id)
+
+
+def test_delete_terminal_record_removes_store_and_memory_and_blocks_active(monkeypatch):
+    instance = manager(monkeypatch)
+    instance._tasks['t'] = {'task_id': 't', 'user_id': 'owner', 'status': 'failed'}
+    delete = Mock(return_value=True)
+    monkeypatch.setattr(module.task_store, 'delete_task', delete)
+    assert instance.delete_task('stranger', 't') is False
+    delete.assert_not_called()
+    instance._tasks['t']['status'] = 'paused'
+    with pytest.raises(TaskAlreadyActiveError): instance.delete_task('owner', 't')
+    delete.assert_not_called()
+    instance._tasks['t']['status'] = 'failed'
+    delete.side_effect = RuntimeError('storage unavailable')
+    with pytest.raises(RuntimeError): instance.delete_task('owner', 't')
+    assert 't' in instance._tasks
+    delete.side_effect = None
+    assert instance.delete_task('owner', 't') is True
+    assert 't' not in instance._tasks
+    delete.assert_called_with(module.LEARNING_TASK_KIND, 't', 'owner')
+    assert not instance._merge_task_from_store({'task_id': 't', 'user_id': 'owner', 'status': 'failed'})
+    assert 't' not in instance._tasks
+
+
+@pytest.mark.asyncio
+async def test_restart_decrypts_config_and_uses_current_saved_account_credentials(monkeypatch):
+    import json
+    from cryptography.fernet import Fernet
+    cipher = Fernet(Fernet.generate_key())
+    monkeypatch.setattr(api, 'encrypt_str', lambda value: 'fernet:' + cipher.encrypt(value.encode()).decode())
+    monkeypatch.setattr(api, 'decrypt_str', lambda value: cipher.decrypt(value[7:].encode()).decode())
+    config = api.AccountTask(course_ids=['course-a'], concurrency=4, chapter_limits={'course-a': 'chapter-5'},
+                             tiku_config={'token': 'test-token'}).model_dump(exclude={'username', 'password'})
+    encrypted = api.encrypt_str(json.dumps(config))
+    instance = Mock()
+    instance.restart_config.return_value = ('a', encrypted)
+    instance.start_task.return_value = 'new-task'
+    store = ManagedAccounts()
+    store.credentials = lambda owner, account: ({'account_key': 'key', 'account_label': 'masked', 'label': 'A'}, 'current-user', 'rotated-password')
+    monkeypatch.setattr(api, 'managed_accounts', store)
+    monkeypatch.setattr(api, '_get_learning_manager', lambda: instance)
+    assert (await api.restart_task('old-task', 'owner'))['task_id'] == 'new-task'
+    sent = instance.start_task.call_args.args[1]
+    assert sent['concurrency'] == 4 and sent['chapter_limits'] == {'course-a': 'chapter-5'}
+    assert sent['password'] == 'rotated-password' and sent['tiku_config']['token'] == 'test-token'
+    assert 'test-token' not in sent['_restart_config']
+    instance.restart_config.return_value = ('a', None)
+    with pytest.raises(HTTPException) as exc: await api.restart_task('old-task', 'owner')
+    assert exc.value.status_code == 409
+
+
+def test_delete_drains_previous_persist_before_removing_record(monkeypatch):
+    instance = manager(monkeypatch)
+    sequence = module._TaskPersistSequencer()
+    revision = sequence.reserve()
+    instance._tasks['t'] = {'task_id': 't', 'user_id': 'owner', 'status': 'failed', '_persist_sequencer': sequence}
+    started = threading.Event()
+    release = threading.Event()
+    operations = []
+    def persist():
+        started.set()
+        assert release.wait(2)
+        operations.append('upsert')
+    monkeypatch.setattr(module.task_store, 'delete_task', lambda *args: operations.append('delete'))
+    with ThreadPoolExecutor(2) as pool:
+        writer = pool.submit(sequence.run, revision, persist)
+        assert started.wait(2)
+        remover = pool.submit(instance.delete_task, 'owner', 't')
+        release.set()
+        writer.result(timeout=2)
+        assert remover.result(timeout=2)
+    assert operations == ['upsert', 'delete']
+    assert 't' not in instance._tasks

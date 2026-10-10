@@ -1,3 +1,4 @@
+import { MemoryRouter } from 'react-router-dom'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
@@ -32,7 +33,7 @@ afterEach(cleanup)
 
 test('another account can start while account A runs, without resending credentials', async () => {
   const user = userEvent.setup()
-  render(<ManagedChaoxing />)
+  render(<MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}><ManagedChaoxing /></MemoryRouter>)
   await user.click(await screen.findByRole('button', { name: /账号乙 ·/ }))
   await user.click(screen.getByRole('button', { name: '连接并读取课程' }))
   await user.click(await screen.findByRole('button', { name: '选择 乙的课程' }))
@@ -51,7 +52,7 @@ test('late course response from A is ignored after selecting B', async () => {
   mocks.api.mockImplementation(path => path === '/learning-accounts/a/courses'
     ? new Promise(resolve => { resolveCourses = resolve }) : defaultApi(path))
   const user = userEvent.setup()
-  render(<ManagedChaoxing />)
+  render(<MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}><ManagedChaoxing /></MemoryRouter>)
   await screen.findByRole('button', { name: /账号甲 ·/ })
   await user.click(screen.getByRole('button', { name: '连接并读取课程' }))
   await user.click(screen.getByRole('button', { name: /账号乙 ·/ }))
@@ -62,10 +63,16 @@ test('late course response from A is ignored after selecting B', async () => {
 
 test('pause targets the explicitly selected task even while viewing another account', async () => {
   const user = userEvent.setup()
-  render(<ManagedChaoxing />)
+  render(<MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}><ManagedChaoxing /></MemoryRouter>)
   await user.click(await screen.findByRole('button', { name: /账号乙 ·/ }))
   await user.click(screen.getByRole('button', { name: /账号甲 running/ }))
   await user.click(screen.getByRole('button', { name: '暂停' }))
   await waitFor(() => expect(mocks.api).toHaveBeenCalledWith('/course/task/task-a/pause', { method: 'POST' }))
   expect(screen.queryByRole('button', { name: '开始刷课' })).not.toBeInTheDocument()
+})
+
+
+test('restart setup selects the requested saved account and explains platform progress', async () => {
+  render(<MemoryRouter initialEntries={[{ pathname: '/chaoxing-fanya', state: { accountId: 'b', restartSetup: true } }]} future={{ v7_startTransition: true, v7_relativeSplatPath: true }}><ManagedChaoxing /></MemoryRouter>)
+  expect(await screen.findByText(/请选择课程和参数后启动/)).toBeInTheDocument()
 })

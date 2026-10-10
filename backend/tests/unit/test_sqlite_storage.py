@@ -67,3 +67,16 @@ def test_history_append_list_and_prune(tmp_path):
         )
     hist = s.list_history("signin", user_id="u1", limit=50)
     assert [h["message"] for h in hist] == ["m4", "m3", "m2"]  # newest 3 kept, DESC
+
+
+def test_delete_is_owner_and_kind_scoped_and_durable(tmp_path):
+    s = _store(tmp_path)
+    for kind, task, owner in [('learning', 'a', 'u1'), ('signin', 'a', 'u1'), ('learning', 'b', 'u2')]:
+        assert s.upsert_task(kind, {'task_id': task, 'user_id': owner, 'status': 'failed'})
+    assert not s.delete_task('learning', 'a', 'u2')
+    assert s.get_task('learning', 'a', 'u1')
+    assert s.delete_task('learning', 'a', 'u1')
+    assert s.get_task('learning', 'a', 'u1') is None
+    assert s.get_task('signin', 'a', 'u1')
+    assert s.get_task('learning', 'b', 'u2')
+    assert _store(tmp_path).get_task('learning', 'a', 'u1') is None

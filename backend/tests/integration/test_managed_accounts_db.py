@@ -60,3 +60,13 @@ def test_duplicate_account_is_rejected_without_overwriting_password(store):
     with pytest.raises(HTTPException) as error: store.save('owner-a', '13800000000', 'changed', 'B')
     assert error.value.status_code == 409
     assert store.credentials('owner-a', saved['id'])[2] == 'dummy-secret'
+
+
+def test_task_record_delete_is_scoped_and_survives_recreation(store):
+    from app.storage.postgres import PostgresStorage
+    tasks = PostgresStorage().tasks
+    assert tasks.upsert_task('chaoxing_learning', {'task_id': 'isolated-delete', 'user_id': 'owner-a', 'status': 'failed'})
+    assert not tasks.delete_task('chaoxing_learning', 'isolated-delete', 'owner-b')
+    assert tasks.get_task('chaoxing_learning', 'isolated-delete', 'owner-a')
+    assert tasks.delete_task('chaoxing_learning', 'isolated-delete', 'owner-a')
+    assert PostgresStorage().tasks.get_task('chaoxing_learning', 'isolated-delete', 'owner-a') is None

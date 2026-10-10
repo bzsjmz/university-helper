@@ -220,3 +220,49 @@ test('a pre-deletion account poll cannot restore the removed account', async () 
   await waitFor(() => expect(screen.queryByRole('button', { name: '删除账号乙' })).not.toBeInTheDocument())
   expect(queries).toBe(2)
 })
+
+test('details button scrolls to and focuses details even for the already selected task', async () => {
+  const scroll = vi.fn()
+  Element.prototype.scrollIntoView = scroll
+  renderConsole()
+  await screen.findByRole('article', { name: / task-a$/ })
+  fireEvent.click(within(card('task-a')).getByRole('button', { name: '查看详情' }))
+  expect(scroll).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' })
+  expect(screen.getByRole('region', { name: '所选任务详情' })).toHaveFocus()
+  fireEvent.click(within(card('task-b')).getByRole('button', { name: '查看详情' }))
+  expect(screen.getByRole('region', { name: '所选任务详情' })).toHaveTextContent('乙的日志')
+  delete Element.prototype.scrollIntoView
+})
+
+test('terminal task deletion is confirmed and does not delete its account', async () => {
+  tasks[0].status = 'failed'
+  mocks.api.mockImplementation(async (path, options = {}) => {
+    if (path === '/learning-accounts') return { accounts: savedAccounts }
+    if (path === '/course/tasks') return { data: tasks }
+    if (options.method === 'DELETE') tasks = tasks.filter(task => task.task_id !== path.split('/').at(-1))
+    return { status: 'success' }
+  })
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+  renderConsole()
+  await screen.findByRole('article', { name: / task-a$/ })
+  fireEvent.click(within(card('task-a')).getByRole('button', { name: '删除记录' }))
+  expect(mocks.api).not.toHaveBeenCalledWith('/course/task/task-a', { method: 'DELETE' })
+  confirm.mockReturnValue(true)
+  fireEvent.click(within(card('task-a')).getByRole('button', { name: '删除记录' }))
+  await waitFor(() => expect(screen.queryByRole('article', { name: / task-a$/ })).not.toBeInTheDocument())
+  expect(mocks.api).toHaveBeenCalledWith('/course/task/task-a', { method: 'DELETE' })
+  expect(savedAccounts).toHaveLength(2)
+})
+
+test('new terminal tasks restart via stored config; old tasks go to configuration', async () => {
+  tasks[0].status = 'failed'
+  tasks[0].can_restart = true
+  tasks[1].status = 'failed'
+  vi.spyOn(window, 'confirm').mockReturnValue(true)
+  renderConsole()
+  await screen.findByRole('article', { name: / task-a$/ })
+  fireEvent.click(within(card('task-a')).getByRole('button', { name: '重新启动' }))
+  await waitFor(() => expect(mocks.api).toHaveBeenCalledWith('/learning-accounts/tasks/task-a/restart', { method: 'POST' }))
+  fireEvent.click(within(card('task-b')).getByRole('button', { name: '重新配置并启动' }))
+  expect(await screen.findByRole('heading', { name: '账号管理页面' })).toBeInTheDocument()
+})

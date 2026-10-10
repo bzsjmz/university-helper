@@ -131,6 +131,15 @@ class _PostgresTaskStore:
             )
             return False
 
+    def delete_task(self, task_kind: str, task_id: str, user_id: str) -> bool:
+        if self.ensure_tables() is not True:
+            raise RuntimeError("Task storage unavailable")
+        with get_db_session() as conn:
+            cur = conn.cursor()
+            cur.execute("DELETE FROM course_task_store WHERE task_kind=%s AND task_id=%s AND user_id=%s",
+                        (task_kind, task_id, str(user_id)))
+            return cur.rowcount > 0
+
     def get_task(
         self,
         task_kind: str,
