@@ -1,0 +1,2 @@
+FROM ghcr.io/sweetcornna/university-helper-web:1.5.0
+COPY frontend/dist /usr/share/nginx/html

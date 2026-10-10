@@ -1,4 +1,5 @@
 import logging
+import os
 import threading
 import time
 from collections.abc import Callable
@@ -181,14 +182,22 @@ class ChaoxingLearningManager:
         validate_tiku_config((payload or {}).get("tiku_config"))
 
         normalized_user_id = str(user_id or "").strip()
+        account_id = str((payload or {}).get("account_id") or "")
+        account_key = str((payload or {}).get("account_key") or "")
         with self._lock:
             cleanup_task_records(self._tasks)
             if any(
-                str(task.get("user_id") or "").strip() == normalized_user_id and is_active_status(task.get("status"))
+                is_active_status(task.get("status")) and (
+                    (account_key and task.get("account_key") == account_key) or
+                    (str(task.get("user_id") or "").strip() == normalized_user_id and
+                     (not account_id or not task.get("account_id") or task.get("account_id") == account_id))
+                )
                 for task in self._tasks.values()
             ):
                 raise TaskAlreadyActiveError()
-            if count_active_tasks(self._tasks) >= MAX_ACTIVE_TASKS:
+            # Zero explicitly disables the deployment's account-task limit.
+            active_limit = max(0, int(os.environ.get("CHAOXING_MAX_ACTIVE_TASKS", MAX_ACTIVE_TASKS)))
+            if active_limit and count_active_tasks(self._tasks) >= active_limit:
                 raise TaskCapacityError()
 
             task_id = uuid4().hex
@@ -200,6 +209,10 @@ class ChaoxingLearningManager:
                 "task_id": task_id,
                 "user_id": user_id,
                 "platform": "chaoxing",
+                "account_id": account_id or None,
+                "account_key": account_key or None,
+                "account_label": str((payload or {}).get("account_label") or ""),
+                "account_name": str((payload or {}).get("account_name") or ""),
                 "status": "pending",
                 "message": "Task created",
                 "current_task": "preparing",

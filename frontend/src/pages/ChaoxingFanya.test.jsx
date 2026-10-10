@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../components', () => ({
   useToast: () => mocks.toast,
+  useRuntimeProfile: () => ({ isLocal: true }),
 }))
 
 vi.mock('./chaoxing-fanya/hooks/useAuthentication', () => {

@@ -3,7 +3,7 @@ import { CARD, DONE_STATUSES, toNum, normalizeCourseText } from '../utils'
 
 export default function TaskControlSection({
   taskId, taskStatus, loading, isRunning, statusText,
-  startTask, controlTask, controlLoading = {},
+  startTask, controlTask, controlLoading = {}, showStartButton = true,
 }) {
 
 
@@ -24,7 +24,7 @@ export default function TaskControlSection({
       <div className="mb-4 flex flex-wrap gap-2">
 
 
-        <button
+        {showStartButton && <button
 
 
           type="button"
@@ -51,7 +51,7 @@ export default function TaskControlSection({
           {loading ? '启动中...' : '开始刷课'}
 
 
-        </button>
+        </button>}
 
 
         <button
