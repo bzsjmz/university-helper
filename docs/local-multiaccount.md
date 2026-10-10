@@ -63,3 +63,16 @@ the Chaoxing page; the console links to it and preserves links to other services
 
 This console is frontend-only and can be deployed by updating the web service
 without restarting backend worker threads.
+
+## Passive QQ task query
+
+`integrations/astrbot_plugin_course_tasks` is an independent AstrBot plugin with
+an administrator-only `/任务状态 [页码]` command. It uses the existing QQ adapter
+and never sends proactive messages. The server optionally exports a single
+configured management owner's status every five seconds to a dedicated private
+directory. The bot receives only a read-only mount of that sanitized directory;
+no database, credentials, tokens or additional network connectivity are shared.
+Snapshots exclude raw logs and notification configuration, prioritize active
+tasks, and bound detail to 200 records. The bot rejects snapshots older than
+30 seconds and replies with five records per page. The existing group silence
+guard explicitly permits this exact command; permission checks still apply.

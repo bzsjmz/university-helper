@@ -1,0 +1,7 @@
+{
+  "status_file": {
+    "type": "string",
+    "description": "本项目专用只读状态快照路径",
+    "default": "/course-task-status/status.json"
+  }
+}

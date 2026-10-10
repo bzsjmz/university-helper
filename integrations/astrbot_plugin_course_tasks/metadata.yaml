@@ -1,0 +1,5 @@
+name: astrbot_plugin_course_tasks
+display_name: 学习通任务查询
+desc: 独立的管理员只读任务状态指令，与 OJ 榜单分开，不主动通知
+version: v1.0.0
+author: local
