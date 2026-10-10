@@ -207,7 +207,8 @@ export default function ManagedChaoxing() {
       </details>
       {selectedAccount && <div className="mt-4 flex flex-wrap items-start gap-3">
         <button type="button" disabled={courseLoading} onClick={() => { void loadCourses() }} className="rounded-xl bg-primary px-4 py-2 text-white">{courseLoading ? '连接中…' : '连接并读取课程'}</button>
-        <button type="button" disabled={Boolean(activeTask)} onClick={() => { void deleteAccount() }} className="rounded-xl border border-border px-4 py-2 disabled:opacity-40">删除账号</button>
+        <button type="button" disabled={Boolean(activeTask)} title={activeTask ? '请先停止此账号的任务，再删除账号' : '删除保存的账号，历史任务保留'} onClick={() => { void deleteAccount() }} className="rounded-xl border border-border px-4 py-2 disabled:opacity-40">删除账号</button>
+        {activeTask && <span className="py-2 text-xs text-text-muted">停止任务后可删除账号，暂停状态仍算活动任务。</span>}
         {!activeTask && <details><summary className="cursor-pointer py-2">更新密码</summary>
           <form onSubmit={updatePassword} className="flex gap-2"><input aria-label="新学习通密码" name="password" type="password" required autoComplete="new-password" className="rounded-xl border border-border bg-surface p-2" />
             <button className="rounded-xl bg-primary px-3 text-white">保存新密码</button></form>

@@ -17,12 +17,18 @@ const makeTasks = () => [
   { task_id: 'legacy', status: 'failed', progress: {}, logs: [] },
 ]
 let tasks
+let savedAccounts
 beforeEach(() => {
   tasks = makeTasks()
+  savedAccounts = [...accounts]
   mocks.api.mockReset()
-  mocks.api.mockImplementation(async path => {
-    if (path === '/learning-accounts') return { accounts }
+  mocks.api.mockImplementation(async (path, options = {}) => {
+    if (path === '/learning-accounts') return { accounts: savedAccounts }
     if (path === '/course/tasks') return { data: tasks.map(task => ({ ...task })) }
+    if (options.method === 'DELETE' && path.startsWith('/learning-accounts/')) {
+      savedAccounts = savedAccounts.filter(account => account.id !== path.split('/').at(-1))
+      return { status: 'success' }
+    }
     const action = path.split('/').at(-1)
     const id = path.split('/').at(-2)
     tasks = tasks.map(task => task.task_id !== id ? task : { ...task, status: { pause: 'paused', resume: 'running', stop: 'cancelling' }[action] })
@@ -55,7 +61,7 @@ test('account and status filtering and search limit the task list and detail', a
   const user = userEvent.setup()
   renderConsole()
   const aside = await screen.findByRole('complementary', { name: '账号筛选' })
-  await user.click(await within(aside).findByRole('button', { name: /账号乙/ }))
+  await user.click(await within(aside).findByRole('button', { name: /^账号乙/ }))
   expect(screen.getAllByRole('article')).toHaveLength(1)
   expect(screen.getByRole('region', { name: '所选任务详情' })).toHaveTextContent('乙的日志')
   await user.click(within(aside).getByRole('button', { name: '全部账号' }))
@@ -153,4 +159,64 @@ test('opening account management does not issue task commands', async () => {
   fireEvent.click(screen.getByRole('button', { name: '管理账号 / 启动任务' }))
   expect(screen.getByRole('heading', { name: '账号管理页面' })).toBeInTheDocument()
   expect(mocks.api.mock.calls.some(([, options]) => options?.method === 'POST')).toBe(false)
+})
+
+test('running and paused accounts cannot be deleted from the console', async () => {
+  renderConsole()
+  const aside = await screen.findByRole('complementary', { name: '账号筛选' })
+  expect(await within(aside).findByRole('button', { name: '删除账号甲' })).toBeDisabled()
+  expect(within(aside).getByRole('button', { name: '删除账号乙' })).toBeDisabled()
+  expect(within(aside).getAllByText('停止任务后可删除')).toHaveLength(2)
+  expect(mocks.api.mock.calls.some(([, options]) => options?.method === 'DELETE')).toBe(false)
+})
+
+test('confirmed deletion removes a stopped account, resets its filter and retains task history', async () => {
+  tasks[1].status = 'completed'
+  const user = userEvent.setup()
+  renderConsole()
+  const aside = await screen.findByRole('complementary', { name: '账号筛选' })
+  await user.click(await within(aside).findByRole('button', { name: /^账号乙/ }))
+  await user.click(within(aside).getByRole('button', { name: '删除账号乙' }))
+  await user.click(screen.getByRole('button', { name: '取消', exact: true }))
+  expect(mocks.api.mock.calls.some(([, options]) => options?.method === 'DELETE')).toBe(false)
+  await user.click(within(aside).getByRole('button', { name: '删除账号乙' }))
+  await user.click(screen.getByRole('button', { name: '确认删除', exact: true }))
+  await waitFor(() => expect(within(aside).queryByRole('button', { name: /^账号乙/ })).not.toBeInTheDocument())
+  expect(mocks.api).toHaveBeenCalledWith('/learning-accounts/b', { method: 'DELETE' })
+  expect(within(aside).getByRole('button', { name: '全部账号' })).toHaveAttribute('aria-pressed', 'true')
+  expect(card('task-b')).toBeInTheDocument()
+  expect(within(aside).getByRole('button', { name: /^账号甲/ })).toBeInTheDocument()
+})
+
+test('a backend refusal preserves the account and displays the reason', async () => {
+  tasks[1].status = 'completed'
+  const implementation = mocks.api.getMockImplementation()
+  mocks.api.mockImplementation((path, options) => options?.method === 'DELETE'
+    ? Promise.reject(new Error('此账号已有活动任务，请先停止')) : implementation(path, options))
+  const user = userEvent.setup()
+  renderConsole()
+  await user.click(await screen.findByRole('button', { name: '删除账号乙' }))
+  await user.click(screen.getByRole('button', { name: '确认删除', exact: true }))
+  expect(await screen.findByRole('alert')).toHaveTextContent('此账号已有活动任务')
+  expect(within(screen.getByRole('complementary', { name: '账号筛选' })).getByRole('button', { name: /^账号乙/ })).toBeInTheDocument()
+})
+
+test('a pre-deletion account poll cannot restore the removed account', async () => {
+  tasks[1].status = 'completed'
+  const user = userEvent.setup()
+  renderConsole()
+  await screen.findByRole('button', { name: '删除账号乙' })
+  const implementation = mocks.api.getMockImplementation()
+  let finishOldQuery
+  let queries = 0
+  mocks.api.mockImplementation((path, options) => {
+    if (path === '/learning-accounts' && queries++ === 0) return new Promise(resolve => { finishOldQuery = resolve })
+    return implementation(path, options)
+  })
+  await user.click(screen.getByRole('button', { name: '刷新' }))
+  await user.click(screen.getByRole('button', { name: '删除账号乙' }))
+  await user.click(screen.getByRole('button', { name: '确认删除', exact: true }))
+  await act(async () => { finishOldQuery({ accounts }); await Promise.resolve() })
+  await waitFor(() => expect(screen.queryByRole('button', { name: '删除账号乙' })).not.toBeInTheDocument())
+  expect(queries).toBe(2)
 })

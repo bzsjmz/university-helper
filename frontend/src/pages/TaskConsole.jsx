@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowRight, BookOpen, CheckCircle, GraduationCap, RefreshCw } from 'lucide-react'
+import { ArrowRight, BookOpen, CheckCircle, GraduationCap, RefreshCw, Trash2 } from 'lucide-react'
 import { Card, StatusBadge } from '../components'
 import { api } from '../utils/api'
 import TaskControlSection from './chaoxing-fanya/components/TaskControlSection'
@@ -44,6 +44,9 @@ export default function TaskConsole() {
   const [notice, setNotice] = useState('')
   const [lastSync, setLastSync] = useState(null)
   const [pending, setPending] = useState({})
+  const [deleteId, setDeleteId] = useState('')
+  const [deletingId, setDeletingId] = useState('')
+  const deletingRef = useRef('')
   const inFlight = useRef(null)
   const pendingRef = useRef(new Set())
   const generation = useRef(0)
@@ -125,6 +128,29 @@ export default function TaskConsole() {
     ['失败记录', tasks.filter(task => FAILED.has(task.status)).length],
   ]
 
+  const deleteAccount = async account => {
+    if (deletingRef.current || errors.tasks || errors.accounts || tasks.some(task => task.account_id === account.id && ACTIVE.has(task.status))) return
+    const current = generation.current
+    deletingRef.current = account.id
+    setDeletingId(account.id)
+    setActionError('')
+    try {
+      await api(`/learning-accounts/${encodeURIComponent(account.id)}`, { method: 'DELETE' })
+      if (inFlight.current) await inFlight.current
+      if (generation.current !== current) return
+      setAccounts(previous => previous.filter(item => item.id !== account.id))
+      setAccountId(previous => previous === account.id ? 'all' : previous)
+      setDeleteId('')
+      setNotice(`${account.label} 已删除，历史任务记录保留`)
+      await refresh()
+    } catch (error) {
+      if (generation.current === current) setActionError(error.message || '账号删除失败，请重试')
+    } finally {
+      deletingRef.current = ''
+      if (generation.current === current) setDeletingId('')
+    }
+  }
+
   return <div className="space-y-6">
     <header className="flex flex-wrap items-start justify-between gap-4">
       <div><h1 className="text-3xl font-black text-text">任务控制台</h1>
@@ -149,11 +175,27 @@ export default function TaskConsole() {
           <button type="button" aria-pressed={accountId === 'all'} onClick={() => setAccountId('all')} className={`w-full rounded-xl border p-3 text-left ${accountId === 'all' ? 'border-primary bg-primary/10' : 'border-border'}`}>全部账号</button>
           {accounts.map(account => {
             const task = sorted.find(item => item.account_id === account.id && ACTIVE.has(item.status))
-            return <button key={account.id} type="button" aria-pressed={accountId === account.id} onClick={() => setAccountId(account.id)}
-              className={`w-full rounded-xl border p-3 text-left ${accountId === account.id ? 'border-primary bg-primary/10' : 'border-border'}`}>
+            const deletionBlocked = Boolean(task || errors.tasks || errors.accounts || deletingId)
+            return <div key={account.id} className={`rounded-xl border p-3 ${accountId === account.id ? 'border-primary bg-primary/10' : 'border-border'}`}>
+              <button type="button" aria-pressed={accountId === account.id} onClick={() => setAccountId(account.id)} className="w-full text-left">
               <span className="block font-semibold">{account.label}</span><span className="mt-1 block text-xs text-text-muted">{account.account_label}</span>
               <span className="mt-2 block"><StatusBadge status={task?.status || 'idle'} /></span>
-            </button>
+              </button>
+              <div className="mt-3 flex items-center justify-between gap-2">
+                <span className="text-xs text-text-muted">{task ? '停止任务后可删除' : '可删除保存的账号'}</span>
+                <button type="button" aria-label={`删除${account.label}`} disabled={deletionBlocked}
+                  title={task ? '此账号有运行或暂停任务，请先停止任务' : '删除账号'}
+                  onClick={() => { setDeleteId(account.id); setActionError('') }}
+                  className="flex items-center gap-1 rounded-lg border border-danger/30 px-2 py-1 text-xs text-danger disabled:opacity-40"><Trash2 className="h-3 w-3" aria-hidden="true" />删除</button>
+              </div>
+              {deleteId === account.id && <div role="group" aria-label={`确认删除${account.label}`} className="mt-3 space-y-2 border-t border-border pt-3">
+                <p className="text-xs">确认删除此账号？保存的登录信息会移除，历史任务记录保留。</p>
+                <div className="flex gap-2">
+                  <button type="button" disabled={deletionBlocked} onClick={() => { void deleteAccount(account) }} className="rounded-lg bg-danger px-3 py-2 text-xs text-white disabled:opacity-40">{deletingId === account.id ? '删除中…' : '确认删除'}</button>
+                  <button type="button" disabled={Boolean(deletingId)} onClick={() => setDeleteId('')} className="rounded-lg border border-border px-3 py-2 text-xs">取消</button>
+                </div>
+              </div>}
+            </div>
           })}
           {tasks.some(task => !task.account_id) && <button type="button" aria-pressed={accountId === 'legacy'} onClick={() => setAccountId('legacy')} className="w-full rounded-xl border border-border p-3 text-left">旧任务（账号未记录）</button>}
           {!loading && !accounts.length && !errors.accounts && <p className="text-sm text-text-muted">尚未保存账号，点击上方按钮添加。</p>}

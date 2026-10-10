@@ -64,6 +64,12 @@ the Chaoxing page; the console links to it and preserves links to other services
 This console is frontend-only and can be deployed by updating the web service
 without restarting backend worker threads.
 
+Each account in the console also has a delete action with explicit confirmation.
+Active or paused tasks block account deletion; stop them first. The existing
+owner-scoped backend deletion endpoint is reused. Deleted account filters reset
+to all accounts, while task history is retained. An in-flight account poll is
+drained before applying the deletion and fetching fresh data.
+
 ## Passive QQ task query
 
 `integrations/astrbot_plugin_course_tasks` is an independent AstrBot plugin with
