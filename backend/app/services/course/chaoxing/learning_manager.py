@@ -14,6 +14,7 @@ from ..task_store import task_store
 from .endpoint_security import validate_tiku_config
 from .learning import ChapterTask, JobProcessor, init_chaoxing
 from .payload_mapper import normalize_tiku_config
+from . import query_control as control
 from .task_admission import (
     MAX_ACTIVE_TASKS,
     TaskAlreadyActiveError,
@@ -482,7 +483,14 @@ class ChaoxingLearningManager:
         self._append_task_log(task_id, "Starting login...", "info")
 
         try:
-            chaoxing = init_chaoxing(common_config, tiku_config)
+            with control.job_scope(stop_event.is_set, answering=True):
+                chaoxing = init_chaoxing(common_config, tiku_config)
+        except control.QueryCancelled:
+            self._cancel_task(task_id, "Task cancelled by user")
+            return
+        except control.QueryExpired:
+            self._fail_task(task_id, "Answer-provider initialization timed out")
+            return
         except Exception as exc:
             self._fail_task(task_id, f"Initialize chaoxing client failed: {exc}")
             return

@@ -8,6 +8,7 @@ from loguru import logger
 from .answer_cache import CacheDAO
 from .answer_check import check_answer
 from .answer_utils import _apply_ocr_to_title_if_needed
+from .query_control import bounded_query, check_control, provider_scope, QueryControlError, ProviderUnavailable
 
 
 # TODO: 重构此部分代码，将此类改为抽象类，加载题库方法改为静态方法，禁止直接初始化此类
@@ -129,6 +130,7 @@ class Tiku:
             self.DISABLE = True
             return None
 
+    @bounded_query
     def query(self, q_info: dict) -> str | None:
         if self.DISABLE:
             return None
@@ -359,6 +361,7 @@ class TikuFallback(Tiku):
         self.name = "多题库回退"
         self.providers = list(providers or [])
 
+    @bounded_query
     def query(self, q_info: dict) -> str | None:
         """Cache → chain, with the chain result taken as authoritative.
 
@@ -429,8 +432,16 @@ class TikuFallback(Tiku):
 
         q_type = q_info.get("type")
         for provider in self.providers:
+            check_control()
             try:
-                answer = provider._query(q_info)
+                with provider_scope(provider.name):
+                    answer = provider._query(q_info)
+                    check_control()
+            except QueryControlError:
+                raise
+            except ProviderUnavailable:
+                logger.warning("题库 {} 等待或重试预算耗尽，回退下一来源", provider.name)
+                continue
             except Exception as e:
                 logger.exception(f"{self.name} 查询时 {provider.name} 异常: {e}")
                 continue

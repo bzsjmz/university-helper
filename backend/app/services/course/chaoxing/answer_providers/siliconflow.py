@@ -6,6 +6,7 @@ import requests
 from loguru import logger
 
 from ..answer_base import Tiku
+from .. import query_control as control
 from ..answer_utils import (
     _clean_option_prefix,
     _ensure_answer_list,
@@ -106,6 +107,7 @@ class SiliconFlow(Tiku):
         retry_delay = _parse_non_negative_finite(self.retry_delay, _DEFAULT_RETRY_DELAY)
         min_interval = _parse_non_negative_finite(self.min_interval, _DEFAULT_MIN_INTERVAL)
         for attempt in range(1, max_attempts + 1):
+            control.claim_attempt("SiliconFlow", 3)
             attempt_status_code: int | None = None
             try:
                 if not is_public_endpoint(getattr(self, "api_endpoint", "")) or (
@@ -116,13 +118,13 @@ class SiliconFlow(Tiku):
                 if self.last_request_time:
                     interval = time.time() - self.last_request_time
                     if interval < min_interval:
-                        time.sleep(min_interval - interval)
+                        control.sleep(min_interval - interval)
 
                 response = self._session.post(
                     self.api_endpoint,
                     headers=headers,
                     json=payload,
-                    timeout=self.timeout,
+                    timeout=control.request_timeout(self.timeout),
                     allow_redirects=False,
                 )
                 self.last_request_time = time.time()
@@ -144,7 +146,7 @@ class SiliconFlow(Tiku):
                 status_suffix = f"，HTTP {attempt_status_code}" if attempt_status_code is not None else ""
                 logger.warning(f"硅基流动API调用失败 ({attempt}/{max_attempts}) [{last_error_type}]{status_suffix}")
                 if attempt < max_attempts:
-                    time.sleep(retry_delay * attempt)
+                    control.sleep(retry_delay * attempt)
 
         if last_error_type:
             logger.error(f"硅基流动API连续失败 [{last_error_type}]")

@@ -4,6 +4,7 @@ import requests
 from loguru import logger
 
 from ..answer_base import Tiku
+from ..query_control import claim_attempt, request_timeout
 from ..endpoint_security import assert_public_endpoint, is_public_endpoint
 
 
@@ -33,6 +34,7 @@ class TikuAdapter(Tiku):
             return None
 
         options = q_info["options"]
+        claim_attempt("Adapter", 2)
         try:
             res = requests.post(
                 self.api,
@@ -41,7 +43,7 @@ class TikuAdapter(Tiku):
                     "options": [sub(r"^[A-Za-z]\.?、?\s?", "", option) for option in options.split("\n")],
                     "type": type,
                 },
-                timeout=30,
+                timeout=request_timeout(30),
                 allow_redirects=False,
                 **({"proxies": {"http": self.http_proxy, "https": self.http_proxy}} if self.http_proxy else {}),
             )

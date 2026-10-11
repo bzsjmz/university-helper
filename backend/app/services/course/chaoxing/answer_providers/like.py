@@ -6,6 +6,7 @@ import requests
 from loguru import logger
 
 from ..answer_base import Tiku
+from ..query_control import claim_attempt, request_timeout, QueryControlError, ProviderUnavailable
 
 _TRUE_VALUES = frozenset({"1", "true", "yes", "y", "on"})
 _FALSE_VALUES = frozenset({"0", "false", "no", "n", "off", ""})
@@ -171,14 +172,15 @@ class TikuLike(Tiku):
 
         # 发送API请求
         try:
+            claim_attempt("Like", 3)
             res = requests.post(
                 self.query_api,
                 json=request_data,
                 headers=temp_headers,
-                timeout=self._timeout,
+                timeout=request_timeout(self._timeout),
             )
         except requests.exceptions.Timeout:
-            logger.error(f"{self.name}查询超时: 请求超过300秒")
+            logger.error(f"{self.name}查询超时")
             return None
         except requests.exceptions.ConnectionError:
             logger.error(f"{self.name}网络连接错误: 无法连接到API服务器")
@@ -186,6 +188,8 @@ class TikuLike(Tiku):
         except requests.exceptions.RequestException as e:
             logger.error(f"{self.name}查询异常: \n{e}")
             return None
+        except (QueryControlError, ProviderUnavailable):
+            raise
         except Exception as e:
             logger.error(f"{self.name}查询发生未知错误: \n{e}")
             return None
@@ -327,7 +331,7 @@ class TikuLike(Tiku):
             res = requests.post(
                 self.balance_api,
                 headers=temp_headers,
-                timeout=self._timeout,
+                timeout=request_timeout(self._timeout),
             )
             if res.status_code == 200:
                 res_json = res.json()
@@ -348,6 +352,8 @@ class TikuLike(Tiku):
         except ValueError:  # json解析错误或int转换错误
             logger.error(f"{self.name}余额响应解析失败: 响应格式不正确")
             return 0
+        except (QueryControlError, ProviderUnavailable):
+            raise
         except Exception as e:
             logger.error(f"{self.name}Token余额查询过程中出现错误: {e}")
             return 0

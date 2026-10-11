@@ -11,6 +11,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from loguru import logger
+from .query_control import acquired
 
 # Persist the answer cache under a writable path. In production the container
 # runs with a read-only rootfs (docker-compose.server.yml: read_only: true) and
@@ -169,7 +170,7 @@ class CacheDAO:
             entry = flights.setdefault(key, {"lock": threading.Lock(), "users": 0})
             entry["users"] += 1
         try:
-            with entry["lock"]:
+            with acquired(entry["lock"]):
                 yield entry
         finally:
             with self._lock:

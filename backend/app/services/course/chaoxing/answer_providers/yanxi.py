@@ -2,6 +2,7 @@ import requests
 from loguru import logger
 
 from ..answer_base import Tiku
+from ..query_control import claim_attempt, request_timeout, check_control
 
 
 class TikuYanxi(Tiku):
@@ -15,6 +16,7 @@ class TikuYanxi(Tiku):
         self._times = 100  # 查询次数剩余, 初始化为100, 查询后校对修正
 
     def _query(self, q_info: dict):
+        claim_attempt("Yanxi", 2)
         try:
             res = requests.get(
                 self.api,
@@ -24,7 +26,7 @@ class TikuYanxi(Tiku):
                     # 'type':q_info['type'], #修复478题目类型与答案类型不符（不想写后处理了）
                     # 没用，就算有type和options，言溪题库还是可能返回类型不符，问了客服，type仅用于收集
                 },
-                timeout=30,
+                timeout=request_timeout(30),
             )
         except requests.exceptions.Timeout as exc:
             logger.error(f"{self.name}查询超时: {exc.__class__.__name__}")
@@ -39,6 +41,8 @@ class TikuYanxi(Tiku):
         if res.status_code != 200:
             logger.error(f"{self.name}查询失败: HTTP 状态码 {res.status_code}")
             return None
+
+        check_control()
 
         try:
             res_json = res.json()

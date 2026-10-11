@@ -7,6 +7,7 @@ from loguru import logger
 
 from ..answer_base import Tiku
 from ..api_usage import record_response
+from .. import query_control as control
 
 
 # All accounts hit the same public service. Reserve request starts process-wide
@@ -45,7 +46,7 @@ class TikuGo(Tiku):
         now = time.monotonic()
         wait_time = max(0.0, max(_GO_LAST_START + max(3.0, self._min_interval), _GO_NOT_BEFORE) - now)
         if wait_time:
-            time.sleep(wait_time)
+            control.sleep(wait_time)
         _GO_LAST_START = time.monotonic()
 
     def _mark_request_finished(self) -> None:
@@ -55,15 +56,16 @@ class TikuGo(Tiku):
     # -- request / parse --------------------------------------------------
     def _request_question(self, question: str, attempt: int):
         try:
-            with _GO_GATE:
+            with control.acquired(_GO_GATE):
                 self._sleep_for_next_request()
+                control.claim_attempt("GO", 2)
                 request_started = time.monotonic()
                 try:
                     res = requests.post(
                         self.api,
                         data={"question": question},
                         headers=self._headers,
-                        timeout=self._timeout,
+                        timeout=control.request_timeout(self._timeout),
                     )
                 except Exception:
                     record_response("GO", "none", attempt, request_started)
@@ -123,7 +125,7 @@ class TikuGo(Tiku):
         else:
             sleep_seconds = self._retry_backoff * attempt
         logger.warning(f"{self.name}{reason}，{sleep_seconds:.1f}s 后重试 ({attempt}/{self._retry_times})")
-        time.sleep(sleep_seconds)
+        control.sleep(sleep_seconds)
 
     @staticmethod
     def _is_placeholder_answer(answer: str, msg: str) -> bool:

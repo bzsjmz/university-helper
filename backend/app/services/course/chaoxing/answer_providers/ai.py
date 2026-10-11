@@ -13,6 +13,7 @@ from loguru import logger
 
 from ..answer_base import Tiku
 from ..api_usage import record_response
+from .. import query_control as control
 from ..answer_utils import (
     _clean_option_prefix,
     _ensure_answer_list,
@@ -142,7 +143,7 @@ class AI(Tiku):
             self.last_request_time = time.time()
         if sleep_time > 0:
             logger.debug(f"AI请求间隔过短, 等待 {sleep_time:.2f} 秒")
-            time.sleep(sleep_time)
+            control.sleep(sleep_time)
 
     def _build_messages(self, q_info: dict) -> list[dict]:
         options = [_clean_option_prefix(opt) for opt in _prepare_option_lines(q_info.get("options", []))]
@@ -158,6 +159,7 @@ class AI(Tiku):
         # must never mutate a shared self.key while another request is retrying.
         keys = getattr(self, "_keys", None) or [self.key]
         for index, key in enumerate(keys):
+            control.check_control()
             try:
                 answer = self._invoke_completion_with_key(messages, key, "primary" if index == 0 else "fallback")
             except _AnswerResponseError:
@@ -175,6 +177,8 @@ class AI(Tiku):
             return None
         last_error_type: str | None = None
         max_attempts = _parse_attempt_count(self.max_retries)
+        if control.active_query():
+            max_attempts = min(max_attempts, 2 if len(getattr(self, "_keys", ()) or ()) > 1 else 3)
         retry_delay = _parse_non_negative_finite(self.retry_delay, _DEFAULT_RETRY_DELAY)
         min_interval_seconds = _parse_non_negative_finite(
             self.min_interval_seconds,
@@ -191,8 +195,13 @@ class AI(Tiku):
                     logger.error("AI题库请求地址校验失败")
                     return None
                 if sem is not None:
-                    sem.acquire()
-                    acquired = True
+                    if control.active_query():
+                        while not acquired:
+                            acquired = sem.acquire(timeout=min(0.2, control.remaining()))
+                    else:
+                        sem.acquire()
+                        acquired = True
+                control.check_control()
                 self._respect_interval()
                 headers = {
                     "Authorization": f"Bearer {key}",
@@ -206,17 +215,20 @@ class AI(Tiku):
                 if urlsplit(self.endpoint).hostname == "api.deepseek.com":
                     payload["thinking"] = {"type": "disabled"}
                 request_started = time.monotonic()
+                control.claim_attempt("AI", 3)
                 try:
                     response = self._httpx_client.post(
                         self.endpoint,
                         headers=headers,
                         json=payload,
                         follow_redirects=False,
+                        **({"timeout": control.request_timeout(self.timeout)} if control.active_query() else {}),
                     )
                 except Exception:
                     record_response("AI", role, attempt, request_started)
                     raise
                 record_response("AI", role, attempt, request_started, response)
+                control.check_control()
                 if acquired:
                     sem.release()
                     acquired = False
@@ -290,6 +302,8 @@ class AI(Tiku):
                     logger.warning("AI大模型返回空答案，将视为无答案处理")
                     raise _AnswerResponseError()
                 return "\n".join(answers).strip()
+            except (control.QueryControlError, control.ProviderUnavailable):
+                raise
             except Exception as exc:
                 if attempt_status_code == 200:
                     raise _AnswerResponseError() from None
@@ -304,12 +318,12 @@ class AI(Tiku):
                         f"HTTP {attempt_status_code}，将休眠 {cool_down:.2f} 秒"
                     )
                     if attempt < max_attempts:
-                        time.sleep(cool_down)
+                        control.sleep(cool_down)
                 else:
                     status_suffix = f"，HTTP {attempt_status_code}" if attempt_status_code is not None else ""
                     logger.warning(f"AI大模型请求失败 ({attempt}/{max_attempts}) [{last_error_type}]{status_suffix}")
                     if attempt < max_attempts:
-                        time.sleep(retry_delay * attempt)
+                        control.sleep(retry_delay * attempt)
             finally:
                 if acquired and sem is not None:
                     sem.release()

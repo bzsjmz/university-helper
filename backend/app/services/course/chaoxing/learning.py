@@ -32,6 +32,7 @@ from .client import Account, Chaoxing, StudyResult
 from .exceptions import InputFormatError, LoginError
 from .live import Live
 from .live_process import LiveProcessor
+from . import query_control as control
 
 
 class ChapterResult(enum.Enum):
@@ -242,7 +243,18 @@ def init_chaoxing(common_config, tiku_config):
     return chaoxing
 
 
-def process_job(
+def process_job(chaoxing, course, job, job_info, speed, progress_callback=None, should_stop_callback=None):
+    try:
+        with control.job_scope(should_stop_callback, answering=job.get("type") == "work"):
+            return _process_job(chaoxing, course, job, job_info, speed, progress_callback, should_stop_callback)
+    except control.QueryCancelled:
+        return StudyResult.CANCELLED
+    except control.QueryExpired:
+        logger.warning("答题任务点超时，停止本次处理")
+        return StudyResult.ERROR
+
+
+def _process_job(
     chaoxing: Chaoxing,
     course: dict,
     job: dict,
@@ -379,7 +391,7 @@ class JobProcessor:
         self.chaoxing = chaoxing
         self.course = course
         self.speed = config["speed"]
-        self.max_tries = 5
+        self.max_tries = max(1, int(control.setting("CHAOXING_CHAPTER_MAX_ATTEMPTS", 3)))
         self.tasks = tasks
         self.failed_tasks: list[ChapterTask] = []
         self.task_queue: PriorityQueue[ChapterTask] = PriorityQueue()
@@ -398,12 +410,22 @@ class JobProcessor:
         self._pending_retries = 0
         self._retry_lock = threading.Lock()
 
-    def _enqueue_retry(self, task: "ChapterTask", stop_event: threading.Event | None = None) -> None:
-        """Move a task into the retry pipeline.
+    def _wait_retry(self, task, stop_event=None):
+        delay = min(30, control.setting("CHAOXING_CHAPTER_RETRY_DELAY_SECONDS", 2) * max(1, task.tries))
+        deadline = time.monotonic() + delay
+        while time.monotonic() < deadline:
+            if should_stop(self.config) or (stop_event is not None and stop_event.is_set()):
+                return False
+            if stop_event is not None:
+                stop_event.wait(min(0.2, deadline - time.monotonic()))
+            else:
+                time.sleep(max(0, min(0.2, deadline - time.monotonic())))
+        return True
 
-        Increments the pending-retry counter BEFORE the worker's task_done()
-        decrements unfinished_tasks, so the task is continuously accounted for.
-        """
+    def _enqueue_retry(self, task: "ChapterTask", stop_event: threading.Event | None = None) -> None:
+        """Retry after cancellable backoff, keeping the task accounted for."""
+        if not self._wait_retry(task, stop_event):
+            return
         with self._drain_lock:
             if stop_event is not None and stop_event.is_set():
                 return
@@ -628,7 +650,7 @@ class JobProcessor:
                             )
                             self.failed_tasks.append(task)
                             break
-                        time.sleep(1)
+                        self._wait_retry(task)
 
                     case ChapterResult.ERROR:
                         task.tries += 1
@@ -642,7 +664,7 @@ class JobProcessor:
                             logger.error("Max retries reached for task: {}", task.point["title"])
                             self.failed_tasks.append(task)
                             break
-                        time.sleep(1)
+                        self._wait_retry(task)
 
                     case ChapterResult.CANCELLED:
                         logger.info("Task cancelled: {}", task.point["title"])
@@ -877,7 +899,9 @@ def process_chapter(
     # TODO: 个别章节很恶心，多到5个点，可以并行处理，将来会让不同课程不同章节的所有任务点共享一个队列，从而实现全局并行
     job_results: list[StudyResult] = []
     video_progress_callback = config.get("video_progress_callback") if config else None
-    stop_callback = config.get("should_stop") if config else None
+    task_stop = config.get("should_stop") if config else None
+    chapter_stop = threading.Event()
+    stop_callback = lambda: chapter_stop.is_set() or (callable(task_stop) and task_stop())
     executor = ThreadPoolExecutor(max_workers=5)
     fast_shutdown = False
     try:
@@ -900,6 +924,10 @@ def process_chapter(
             if not _is_thread_start_failure(exc):
                 raise
             fast_shutdown = True
+            if pending:
+                # Some points already started: never replay them inline while
+                # their original workers may still submit answers.
+                return ChapterResult.ERROR
             for future in pending:
                 future.cancel()
             logger.warning("Cannot start Chaoxing job worker thread; processing task points inline")
@@ -930,7 +958,10 @@ def process_chapter(
                         pending_future.cancel()
                     return ChapterResult.ERROR
     finally:
-        executor.shutdown(wait=not fast_shutdown, cancel_futures=fast_shutdown)
+        # Signal siblings and wait for real exit before retrying this chapter
+        # or releasing its account. Future.cancel() cannot stop a running job.
+        chapter_stop.set()
+        executor.shutdown(wait=True, cancel_futures=fast_shutdown)
 
     for result in job_results:
         if result == StudyResult.CANCELLED:

@@ -3,8 +3,9 @@
 import random
 import re
 import threading
-import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextvars import copy_context
+from . import query_control as control
 
 from loguru import logger
 
@@ -137,6 +138,7 @@ class ChaoxingWorkLegacyService:
         delay = 1
         retries = 0
         while retries < max_retries:
+            control.check_control()
             try:
                 _resp = session.get(
                     url,
@@ -174,10 +176,12 @@ class ChaoxingWorkLegacyService:
 
             except PermissionError:
                 raise
+            except control.QueryControlError:
+                raise
             except Exception as e:
                 logger.warning(f"请求失败: {str(e)[:50]}, 重试中... ({retries + 1}/{max_retries})")
             retries += 1
-            time.sleep(delay * (2**retries))
+            control.sleep(delay * (2**retries))
         raise MaxRetryExceeded(f"超过最大重试次数 ({max_retries})")
 
     # ------------------------------------------------------------------
@@ -186,11 +190,12 @@ class ChaoxingWorkLegacyService:
 
     def _handle_question(self, q, inc_found, origin_html_content):
         """Process a single question: query tiku, match answer, fill form."""
+        control.check_control()
         logger.debug(f"当前题目信息 -> {q}")
         # 添加搜题延迟 #428 - 默认0s延迟
         query_delay = self.kwargs.get("query_delay", 0)
         if query_delay:
-            time.sleep(query_delay)
+            control.sleep(query_delay)
         res = self.tiku.query(q)
         answer = ""
 
@@ -341,7 +346,7 @@ class ChaoxingWorkLegacyService:
 
             with ThreadPoolExecutor(max_workers=ai_concurrency) as executor:
                 future_to_q = {
-                    executor.submit(self._handle_question, q, inc_found_concurrent, _ORIGIN_HTML_CONTENT): q
+                    executor.submit(copy_context().run, self._handle_question, q, inc_found_concurrent, _ORIGIN_HTML_CONTENT): q
                     for q in questions["questions"]
                 }
                 # 收集 future 结果：ThreadPoolExecutor 会吞掉 worker 异常，
@@ -350,6 +355,11 @@ class ChaoxingWorkLegacyService:
                     q = future_to_q[future]
                     try:
                         future.result()
+                    except control.QueryControlError:
+                        control.cancel_job()
+                        for pending in future_to_q:
+                            pending.cancel()
+                        raise
                     except Exception as exc:
                         logger.error(
                             "AI 并发答题处理题目失败 (id={}), 回退随机答案: {}",
@@ -366,6 +376,7 @@ class ChaoxingWorkLegacyService:
             for q in questions["questions"]:
                 self._handle_question(q, inc_found_seq, _ORIGIN_HTML_CONTENT)
 
+        control.check_control()
         cover_rate = (found_answers / total_questions) * 100
         logger.info(f"章节检测题库覆盖率： {cover_rate:.0f}%")
 

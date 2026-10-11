@@ -4,6 +4,7 @@ import requests
 from requests.adapters import HTTPAdapter
 
 from .config import GlobalConst as gc
+from .query_control import check_control, request_timeout
 
 
 class SessionManager:
@@ -22,7 +23,14 @@ class SessionManager:
         adapter = HTTPAdapter(max_retries=3, pool_connections=50, pool_maxsize=100)
         self._session.mount("https://", adapter)
         self._session.mount("http://", adapter)
-        self._session.request = functools.partial(self._session.request, timeout=5)
+        original_request = functools.partial(self._session.request, timeout=5)
+        def bounded_request(*args, **kwargs):
+            check_control()
+            kwargs["timeout"] = request_timeout(kwargs.get("timeout", 5))
+            response = original_request(*args, **kwargs)
+            check_control()
+            return response
+        self._session.request = bounded_request
         self._session.headers.clear()
         self._session.headers.update(gc.HEADERS)
         if cookies:
