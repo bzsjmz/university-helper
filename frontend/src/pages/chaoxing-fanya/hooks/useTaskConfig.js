@@ -7,18 +7,15 @@ export default function useTaskConfig() {
   const [speed, setSpeed] = useState(1.5)
 
 
-  const [concurrency, setConcurrency] = useState(4)
+  const [concurrency, setConcurrency] = useState(2)
 
 
   const [unopenedStrategy, setUnopenedStrategy] = useState('retry')
 
 
-  // Ordered list of answer-bank providers; sent to the backend as a
-  // comma-separated `provider` (单个=单题库，多个=按顺序回退). Default chain:
-  // 言溪 first (best, if a token is set), then the free GO题库 — so 答题 still
-  // works without a Token. (The shared answer cache is always consulted first,
-  // so adding 本地缓存 as an extra link would be redundant.)
-  const [tikuProvider, setTikuProvider] = useState(['TikuYanxi', 'TikuGo'])
+  // The backend consults persistent local answers before external queries.
+  // Keep that default visible, with AI as the only remote fallback.
+  const [tikuProvider, setTikuProvider] = useState(['LocalCache', 'AI'])
 
 
   const [tikuToken, setTikuToken] = useState('')

@@ -42,7 +42,7 @@ test('another account can start while account A runs, without resending credenti
   await user.click(start)
   await waitFor(() => expect(mocks.api).toHaveBeenCalledWith('/learning-accounts/b/tasks', expect.any(Object)))
   const options = mocks.api.mock.calls.find(([path]) => path === '/learning-accounts/b/tasks')[1]
-  expect(JSON.parse(options.body)).toMatchObject({ course_ids: ['course-b'], concurrency: 1 })
+  expect(JSON.parse(options.body)).toMatchObject({ course_ids: ['course-b'], speed: 1.5, concurrency: 2, tiku_config: { provider: 'LocalCache,AI' } })
   expect(options.body).not.toMatch(/username|password/)
 })
 

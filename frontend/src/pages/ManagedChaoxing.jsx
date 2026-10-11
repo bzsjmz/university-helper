@@ -8,6 +8,8 @@ import ConfigSection from './chaoxing-fanya/components/ConfigSection'
 import CourseListSection from './chaoxing-fanya/components/CourseListSection'
 import TaskControlSection from './chaoxing-fanya/components/TaskControlSection'
 import LogSection from './chaoxing-fanya/components/LogSection'
+import BatchChaoxing from './BatchChaoxing'
+import { managedTaskPayload } from './chaoxing-fanya/managedTaskPayload'
 
 const ACTIVE = new Set(['pending', 'started', 'running', 'paused', 'cancelling', 'stopping'])
 
@@ -29,12 +31,11 @@ export default function ManagedChaoxing() {
   const [courseLoading, setCourseLoading] = useState(false)
   const [adding, setAdding] = useState(false)
   const [updatedAt, setUpdatedAt] = useState(null)
+  const [launchMode, setLaunchMode] = useState('single')
+  const [batchBusy, setBatchBusy] = useState(false)
   const accountRef = useRef(accountId)
   const mounted = useRef(true)
   const config = useTaskConfig()
-  const { setConcurrency } = config
-
-  useEffect(() => { setConcurrency(1) }, [setConcurrency])
   useEffect(() => {
     mounted.current = true
     return () => { mounted.current = false }
@@ -159,14 +160,7 @@ export default function ManagedChaoxing() {
     setLoading(true)
     setError('')
     try {
-      const response = await api(`/learning-accounts/${accountId}/tasks`, { method: 'POST', body: JSON.stringify({
-        course_ids: selectedCourses, chapter_limits: chapterLimits,
-        speed: config.speed, concurrency: config.concurrency, unopened_strategy: config.unopenedStrategy,
-        tiku_config: { provider: config.tikuProvider.join(','), token: config.tikuToken,
-          coverage_threshold: config.coverageThreshold, submit_mode: config.submitMode,
-          judge_mapping: { correct: config.correctOptions.split(','), wrong: config.wrongOptions.split(',') } },
-        notify_config: config.notifyService && config.notifyUrl ? { service: config.notifyService, url: config.notifyUrl } : {},
-      }) })
+      const response = await api(`/learning-accounts/${accountId}/tasks`, { method: 'POST', body: JSON.stringify(managedTaskPayload(config, selectedCourses, chapterLimits)) })
       setTaskId(response.task_id)
       await refreshTasks()
       setNotice('任务已启动，可以切换到其他账号继续操作')
@@ -188,8 +182,12 @@ export default function ManagedChaoxing() {
       <p className="mt-2 text-sm text-text-muted">选择账号启动独立任务；切换账号不会停止其他任务。每个账号只运行一个任务。</p>
       {error && <p role="alert" className="mt-3 text-danger">{error}</p>}
       {notice && <p role="status" className="mt-3 text-success">{notice}</p>}
+      <div className="mt-4 flex gap-3" role="group" aria-label="启动方式">
+        <button type="button" disabled={batchBusy || loading} aria-pressed={launchMode === 'single'} onClick={() => setLaunchMode('single')} className="rounded-xl border border-border px-4 py-2">逐个账号操作</button>
+        <button type="button" disabled={batchBusy || loading} aria-pressed={launchMode === 'batch'} onClick={() => setLaunchMode('batch')} className="rounded-xl border border-border px-4 py-2">批量预览并启动</button>
+      </div>
     </section>
-    <section className={CARD}>
+    {launchMode === 'single' && <section className={CARD}>
       <h2 className="mb-3 text-xl font-semibold">我的学习通账号</h2>
       <div className="flex flex-wrap gap-3">
         {accounts.map(account => <button key={account.id} type="button" aria-pressed={account.id === accountId}
@@ -216,7 +214,13 @@ export default function ManagedChaoxing() {
             <button className="rounded-xl bg-primary px-3 text-white">保存新密码</button></form>
         </details>}
       </div>}
-    </section>
+    </section>}
+    {launchMode === 'batch' && <fieldset disabled={batchBusy}>
+      <ConfigSection {...config} />
+    </fieldset>}
+    <div hidden={launchMode !== 'batch'}>
+      <BatchChaoxing accounts={accounts} tasks={tasks} config={config} refreshTasks={refreshTasks} onBusyChange={setBatchBusy} />
+    </div>
     <section className={CARD}>
       <h2 className="text-xl font-semibold">所有账号的任务</h2>
       <p className="my-2 text-xs text-text-muted">每 5 秒刷新 · {updatedAt ? `最近同步 ${updatedAt.toLocaleTimeString()}` : '正在读取'} · 数量为程序执行进度，平台任务点未核验</p>
@@ -228,7 +232,7 @@ export default function ManagedChaoxing() {
         <p className="text-sm text-text-muted">课程 {task.progress?.completed || 0}/{task.progress?.total || 0} · 章节 {task.progress?.completed_chapters || 0}/{task.progress?.total_chapters || 0} · 失败 {task.progress?.failed || 0}</p>
       </button>)}</div>
     </section>
-    {courses.length > 0 && <>
+    {launchMode === 'single' && courses.length > 0 && <>
       <CourseListSection courses={courses} selectedCourses={selectedCourses} setSelectedCourses={setSelectedCourses}
         chapters={chapters} expanded={expanded} toggleExpand={toggleExpand} loadCourses={loadCourses}
         chapterLimits={chapterLimits} setChapterLimit={(id, value) => {

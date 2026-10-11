@@ -7,8 +7,8 @@ const BADGE = 'shrink-0 rounded-full px-2 py-0.5 text-xs'
 
 // Radio list for "study this course up to which chapter". The chosen chapter is
 // inclusive; everything after it is left alone.
-function ChapterLimitPicker({ courseId, courseName, chapterList, limitId, limitIndex, onChange }) {
-  const radioName = `chapter-limit-${courseId}`
+function ChapterLimitPicker({ courseId, courseName, chapterList, limitId, limitIndex, onChange, scope }) {
+  const radioName = `chapter-limit-${scope}-${courseId}`
 
   return (
     <fieldset className="mt-2 text-sm">
@@ -73,7 +73,7 @@ function ChapterLimitSummary({ chapterList, limitId, limitIndex }) {
 
 export default function CourseListSection({
   courses, selectedCourses, setSelectedCourses, chapters, expanded,
-  toggleExpand, loadCourses, chapterLimits = {}, setChapterLimit = () => {},
+  toggleExpand, loadCourses, chapterLimits = {}, setChapterLimit = () => {}, scope = '',
 }) {
 
 
@@ -216,6 +216,7 @@ export default function CourseListSection({
 
 
                   type="checkbox"
+                  aria-label={getCourseName(course)}
 
 
                   className="h-5 w-5"
@@ -290,6 +291,7 @@ export default function CourseListSection({
 
               {isExpanded && (chapterList.length > 0 ? (
                 <ChapterLimitPicker
+                  scope={scope}
                   courseId={courseId}
                   courseName={getCourseName(course)}
                   chapterList={chapterList}
