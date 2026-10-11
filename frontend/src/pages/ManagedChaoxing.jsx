@@ -30,6 +30,7 @@ export default function ManagedChaoxing() {
   const [loading, setLoading] = useState(false)
   const [courseLoading, setCourseLoading] = useState(false)
   const [adding, setAdding] = useState(false)
+  const [renaming, setRenaming] = useState(false)
   const [updatedAt, setUpdatedAt] = useState(null)
   const [launchMode, setLaunchMode] = useState('single')
   const [batchBusy, setBatchBusy] = useState(false)
@@ -130,6 +131,24 @@ export default function ManagedChaoxing() {
     } catch (err) { setError(err.message) }
   }
 
+  const updateName = async event => {
+    event.preventDefault()
+    const targetAccountId = accountId
+    const label = String(new FormData(event.currentTarget).get('label') || '').trim()
+    if (!label || activeTask || renaming) return
+    setRenaming(true)
+    setError('')
+    try {
+      await api(`/learning-accounts/${targetAccountId}`, { method: 'PATCH', body: JSON.stringify({ label }) })
+      await refreshAccounts()
+      if (mounted.current) setNotice('账号显示名称已更新')
+    } catch (err) {
+      if (mounted.current) setError(err.message)
+    } finally {
+      if (mounted.current) setRenaming(false)
+    }
+  }
+
   const updatePassword = async event => {
     event.preventDefault()
     const password = new FormData(event.currentTarget).get('password')
@@ -209,6 +228,14 @@ export default function ManagedChaoxing() {
         <button type="button" disabled={courseLoading} onClick={() => { void loadCourses() }} className="rounded-xl bg-primary px-4 py-2 text-white">{courseLoading ? '连接中…' : '连接并读取课程'}</button>
         <button type="button" disabled={Boolean(activeTask)} title={activeTask ? '请先停止此账号的任务，再删除账号' : '删除保存的账号，历史任务保留'} onClick={() => { void deleteAccount() }} className="rounded-xl border border-border px-4 py-2 disabled:opacity-40">删除账号</button>
         {activeTask && <span className="py-2 text-xs text-text-muted">停止任务后可删除账号，暂停状态仍算活动任务。</span>}
+        <details key={accountId}><summary className="cursor-pointer py-2">修改名称</summary>
+          <form onSubmit={updateName} className="flex flex-wrap gap-2">
+            <input aria-label="账号显示名称" name="label" type="text" defaultValue={selectedAccount.label} required maxLength={128}
+              disabled={Boolean(activeTask) || renaming} className="rounded-xl border border-border bg-surface p-2 disabled:opacity-40" />
+            <button disabled={Boolean(activeTask) || renaming} className="rounded-xl bg-primary px-3 text-white disabled:opacity-40">{renaming ? '保存中…' : '保存名称'}</button>
+          </form>
+          {activeTask && <p className="mt-2 text-xs text-text-muted">请先停止此账号的任务并等待结束，再修改名称。</p>}
+        </details>
         {!activeTask && <details><summary className="cursor-pointer py-2">更新密码</summary>
           <form onSubmit={updatePassword} className="flex gap-2"><input aria-label="新学习通密码" name="password" type="password" required autoComplete="new-password" className="rounded-xl border border-border bg-surface p-2" />
             <button className="rounded-xl bg-primary px-3 text-white">保存新密码</button></form>

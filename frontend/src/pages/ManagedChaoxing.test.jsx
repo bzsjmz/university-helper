@@ -76,3 +76,27 @@ test('restart setup selects the requested saved account and explains platform pr
   render(<MemoryRouter initialEntries={[{ pathname: '/chaoxing-fanya', state: { accountId: 'b', restartSetup: true } }]} future={{ v7_startTransition: true, v7_relativeSplatPath: true }}><ManagedChaoxing /></MemoryRouter>)
   expect(await screen.findByText(/请选择课程和参数后启动/)).toBeInTheDocument()
 })
+
+test('saved account display name can be edited and refreshed without changing credentials', async () => {
+  let renamed = false
+  const originalApi = mocks.api.getMockImplementation()
+  mocks.api.mockImplementation(async (path, options) => {
+    if (path === '/learning-accounts/b' && options?.method === 'PATCH') {
+      renamed = true
+      return { account: { ...accounts[1], label: '新的名称' } }
+    }
+    if (path === '/learning-accounts' && renamed) return { accounts: [accounts[0], { ...accounts[1], label: '新的名称' }] }
+    return originalApi(path, options)
+  })
+  const user = userEvent.setup()
+  render(<MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}><ManagedChaoxing /></MemoryRouter>)
+  await user.click(await screen.findByRole('button', { name: /账号乙 ·/ }))
+  await user.click(screen.getByText('修改名称'))
+  const input = screen.getByRole('textbox', { name: '账号显示名称' })
+  expect(input).toHaveValue('账号乙')
+  await user.clear(input)
+  await user.type(input, ' 新的名称 ')
+  await user.click(screen.getByRole('button', { name: '保存名称' }))
+  expect(await screen.findByRole('button', { name: /新的名称 ·/ })).toBeInTheDocument()
+  expect(mocks.api).toHaveBeenCalledWith('/learning-accounts/b', { method: 'PATCH', body: JSON.stringify({ label: '新的名称' }) })
+})
