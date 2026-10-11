@@ -29,6 +29,11 @@ beforeEach(() => {
       savedAccounts = savedAccounts.filter(account => account.id !== path.split('/').at(-1))
       return { status: 'success' }
     }
+    if (path.endsWith('/restart')) {
+      const id = path.split('/').at(-2)
+      tasks = tasks.map(task => task.task_id === id ? { ...task, task_id: 'new-task', status: 'running', logs: [] } : task)
+      return { task_id: 'new-task', previous_task_removed: true }
+    }
     const action = path.split('/').at(-1)
     const id = path.split('/').at(-2)
     tasks = tasks.map(task => task.task_id !== id ? task : { ...task, status: { pause: 'paused', resume: 'running', stop: 'cancelling' }[action] })
@@ -261,8 +266,13 @@ test('new terminal tasks restart via stored config; old tasks go to configuratio
   vi.spyOn(window, 'confirm').mockReturnValue(true)
   renderConsole()
   await screen.findByRole('article', { name: / task-a$/ })
+  fireEvent.click(screen.getByRole('button', { name: '失败', exact: true }))
   fireEvent.click(within(card('task-a')).getByRole('button', { name: '重新启动' }))
   await waitFor(() => expect(mocks.api).toHaveBeenCalledWith('/learning-accounts/tasks/task-a/restart', { method: 'POST' }))
+  expect(await screen.findByRole('article', { name: / new-task$/ })).toBeInTheDocument()
+  expect(screen.queryByRole('article', { name: / task-a$/ })).not.toBeInTheDocument()
+  expect(screen.getByRole('region', { name: '所选任务详情' })).toHaveTextContent('任务详情 · 账号甲')
+  expect(screen.getByText(/旧记录已替换/)).toBeInTheDocument()
   fireEvent.click(within(card('task-b')).getByRole('button', { name: '重新配置并启动' }))
   expect(await screen.findByRole('heading', { name: '账号管理页面' })).toBeInTheDocument()
 })

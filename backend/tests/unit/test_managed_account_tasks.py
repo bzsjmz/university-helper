@@ -221,3 +221,73 @@ def test_delete_drains_previous_persist_before_removing_record(monkeypatch):
         assert remover.result(timeout=2)
     assert operations == ['upsert', 'delete']
     assert 't' not in instance._tasks
+
+
+@pytest.mark.asyncio
+async def test_restart_replaces_only_its_old_record_after_admission(monkeypatch):
+    from cryptography.fernet import Fernet
+    cipher = Fernet(Fernet.generate_key())
+    monkeypatch.setattr(api, 'encrypt_str', lambda value: 'fernet:' + cipher.encrypt(value.encode()).decode())
+    monkeypatch.setattr(api, 'decrypt_str', lambda value: cipher.decrypt(value[7:].encode()).decode())
+    config = api.encrypt_str('{"course_ids":["course-a"],"chapter_limits":{"course-a":"chapter-5"}}')
+    instance = Mock()
+    instance.restart_config.return_value = ('a', config)
+    events = []
+    instance.start_task.side_effect = lambda *args: events.append('start') or 'new-task'
+    instance.delete_task.side_effect = lambda *args: events.append(('delete', args)) or True
+    store = ManagedAccounts()
+    store.credentials = lambda *args: ({'account_key': 'key', 'account_label': 'masked', 'label': 'A'}, 'user', 'password')
+    monkeypatch.setattr(api, 'managed_accounts', store)
+    monkeypatch.setattr(api, '_get_learning_manager', lambda: instance)
+    response = await api.restart_task('old-task', 'owner')
+    assert events == ['start', ('delete', ('owner', 'old-task'))]
+    assert response['previous_task_removed'] is True
+    assert response['task_id'] == 'new-task' and response['replaced_task_id'] == 'old-task'
+
+    instance.start_task.side_effect = RuntimeError('thread admission failed')
+    instance.delete_task.reset_mock()
+    with pytest.raises(RuntimeError):
+        await api.restart_task('old-task', 'owner')
+    instance.delete_task.assert_not_called()
+
+    instance.start_task.side_effect = None
+    instance.start_task.return_value = 'another-task'
+    instance.delete_task.side_effect = RuntimeError('storage unavailable')
+    response = await api.restart_task('old-task', 'owner')
+    assert response['task_id'] == 'another-task'
+    assert response['previous_task_removed'] is False
+
+
+@pytest.mark.asyncio
+async def test_concurrent_restart_cannot_replay_replaced_terminal_record(monkeypatch):
+    import asyncio
+    from cryptography.fernet import Fernet
+    cipher = Fernet(Fernet.generate_key())
+    monkeypatch.setattr(api, 'encrypt_str', lambda value: 'fernet:' + cipher.encrypt(value.encode()).decode())
+    monkeypatch.setattr(api, 'decrypt_str', lambda value: cipher.decrypt(value[7:].encode()).decode())
+    config = api.encrypt_str('{"course_ids":["course-a"]}')
+    instance = Mock()
+    old_exists = [True]
+    def read(*args):
+        if not old_exists[0]: raise KeyError('Task not found')
+        return 'a', config
+    instance.restart_config.side_effect = read
+    instance.start_task.return_value = 'new-task'
+    instance.delete_task.side_effect = lambda *args: old_exists.__setitem__(0, False) or True
+    store = ManagedAccounts()
+    store.credentials = lambda *args: ({'account_key': 'key', 'account_label': 'masked', 'label': 'A'}, 'user', 'password')
+    monkeypatch.setattr(api, 'managed_accounts', store)
+    monkeypatch.setattr(api, '_get_learning_manager', lambda: instance)
+    results = await asyncio.gather(api.restart_task('old-task', 'owner'), api.restart_task('old-task', 'owner'), return_exceptions=True)
+    assert sum(isinstance(r, dict) for r in results) == 1
+    assert any(isinstance(r, HTTPException) and r.status_code == 404 for r in results)
+    assert instance.start_task.call_count == 1
+
+
+def test_delete_storage_failure_keeps_record_and_restart_config(monkeypatch):
+    instance = manager(monkeypatch)
+    instance._tasks['old'] = {'task_id': 'old', 'user_id': 'owner', 'account_id': 'a',
+                             'status': 'failed', '_restart_config': 'fernet:config'}
+    monkeypatch.setattr(module.task_store, 'delete_task', lambda *args: False)
+    with pytest.raises(RuntimeError): instance.delete_task('owner', 'old')
+    assert instance.restart_config('owner', 'old') == ('a', 'fernet:config')

@@ -112,7 +112,11 @@ export default function TaskConsole() {
       if (response.task_id) setSelectedId(response.task_id)
       if (action === 'delete') setSelectedId(previous => previous === task.task_id ? '' : previous)
       if (generation.current !== current) return
-      setNotice(`${title(task, accounts)}：${{ pause: '暂停', resume: '继续', stop: '停止', restart: '重新启动', delete: '删除记录' }[action]}请求已发送`)
+      if (action === 'restart') {
+        setFilter('all')
+        setSearch('')
+        setNotice(`${title(task, accounts)}：已重新启动${response.previous_task_removed === false ? '，旧记录清理失败，可手动删除；请勿重复启动' : '，旧记录已替换'}`)
+      } else setNotice(`${title(task, accounts)}：${{ pause: '暂停', resume: '继续', stop: '停止', restart: '重新启动', delete: '删除记录' }[action]}请求已发送`)
       // Drain a snapshot that began before the mutation, then query again.
       if (inFlight.current) await inFlight.current
       if (generation.current === current) await refresh()
@@ -236,7 +240,7 @@ export default function TaskConsole() {
               {FINISHED.has(task.status) && <>
                 <button type="button" disabled={busy || !accounts.some(account => account.id === task.account_id)} onClick={() => {
                   if (task.can_restart) {
-                    if (window.confirm(`按原配置重新启动 ${name} 的任务？将读取平台当前进度并跳过已完成内容。`)) void control(task, 'restart')
+                    if (window.confirm(`按原配置重新启动 ${name} 的任务？将读取平台当前进度并跳过已完成内容，启动成功后自动删除此旧记录。`)) void control(task, 'restart')
                   } else navigate('/chaoxing-fanya', { state: { accountId: task.account_id, restartSetup: true } })
                 }} className="rounded-lg border border-primary/30 px-3 py-2 text-sm text-primary disabled:opacity-40">{task.can_restart ? '重新启动' : '重新配置并启动'}</button>
                 <button type="button" disabled={busy} onClick={() => {

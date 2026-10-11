@@ -424,7 +424,8 @@ class ChaoxingLearningManager:
                 raise TaskAlreadyActiveError()
             sequencer = task.get("_persist_sequencer")
             def remove():
-                task_store.delete_task(LEARNING_TASK_KIND, task_id, str(user_id))
+                if task_store.delete_task(LEARNING_TASK_KIND, task_id, str(user_id)) is False:
+                    raise RuntimeError("Task record deletion failed")
             if isinstance(sequencer, _TaskPersistSequencer):
                 sequencer.run(sequencer.reserve(), remove)
             else:

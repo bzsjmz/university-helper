@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 
 from app.core.credential_crypto import encrypt_str, decrypt_str
 
@@ -13,6 +14,7 @@ from app.services.course.chaoxing.endpoint_security import UnsafeEndpointError
 from app.services.course.chaoxing.task_admission import TaskAdmissionError, is_active_status
 from .course import _get_learning_manager, CourseStartRequest
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -106,23 +108,28 @@ async def chapters(account_id: str, course_id: str, owner: str = Depends(get_cur
     return await asyncio.to_thread(fetch)
 
 
+def _start_saved_task(account_id, request, owner):
+    """Caller holds the account lock through admission and replacement."""
+    row, username, password = managed_accounts.credentials(owner, account_id)
+    payload = request.model_dump()
+    config = request.model_dump(exclude={"username", "password"})
+    ciphertext = encrypt_str(json.dumps(config))
+    if not ciphertext.startswith("fernet:"):
+        raise HTTPException(503, "Credential encryption is required")
+    payload["_restart_config"] = ciphertext
+    payload.update(platform='chaoxing', username=username, password=password,
+                   account_id=account_id, account_key=row['account_key'],
+                   account_label=row['account_label'], account_name=row['label'])
+    return _get_learning_manager().start_task(str(owner), payload)
+
+
 @router.post('/{account_id}/tasks')
 async def start_task(account_id: str, request: AccountTask, owner: str = Depends(get_current_user_id)):
     if not request.course_ids or len(request.course_ids) > 100:
         raise HTTPException(422, 'Select between 1 and 100 courses')
     def start():
         with managed_accounts.lock(owner, account_id):
-            row, username, password = managed_accounts.credentials(owner, account_id)
-            payload = request.model_dump()
-            config = request.model_dump(exclude={"username", "password"})
-            ciphertext = encrypt_str(json.dumps(config))
-            if not ciphertext.startswith("fernet:"):
-                raise HTTPException(503, "Credential encryption is required")
-            payload["_restart_config"] = ciphertext
-            payload.update(platform='chaoxing', username=username, password=password,
-                           account_id=account_id, account_key=row['account_key'],
-                           account_label=row['account_label'], account_name=row['label'])
-            return _get_learning_manager().start_task(str(owner), payload)
+            return _start_saved_task(account_id, request, owner)
     try:
         task_id = await asyncio.to_thread(start)
     except TaskAdmissionError as exc:
@@ -134,16 +141,41 @@ async def start_task(account_id: str, request: AccountTask, owner: str = Depends
 
 @router.post('/tasks/{task_id}/restart')
 async def restart_task(task_id: str, owner: str = Depends(get_current_user_id)):
+    def replace():
+        manager = _get_learning_manager()
+        account_id, _ = manager.restart_config(str(owner), task_id)
+        if not account_id:
+            raise HTTPException(409, 'Old task has no saved configuration; select courses and settings again')
+        with managed_accounts.lock(owner, account_id):
+            # Recheck after locking: a concurrent restart may have already
+            # replaced this record, even if its new worker finished quickly.
+            current_account, ciphertext = manager.restart_config(str(owner), task_id)
+            if current_account != account_id or not ciphertext:
+                raise HTTPException(409, 'Old task has no saved configuration; select courses and settings again')
+            try:
+                request = AccountTask.model_validate(json.loads(decrypt_str(ciphertext)))
+            except Exception:
+                raise HTTPException(409, 'Saved configuration unavailable; select courses and settings again') from None
+            if not request.course_ids or len(request.course_ids) > 100:
+                raise HTTPException(409, 'Saved course selection unavailable; select courses again')
+            new_id = _start_saved_task(account_id, request, owner)
+            # Never remove the only restartable record until persistence and
+            # thread admission succeeded. Cleanup failure must not turn an
+            # already-started task into a retryable HTTP failure.
+            removed = True
+            try:
+                manager.delete_task(str(owner), task_id)
+            except Exception:
+                removed = False
+                logger.warning('Restart admitted but previous record cleanup failed')
+            return {'task_id': new_id, 'status': 'started',
+                    'message': 'Task restarted', 'replaced_task_id': task_id,
+                    'previous_task_removed': removed}
     try:
-        account_id, ciphertext = await asyncio.to_thread(_get_learning_manager().restart_config, str(owner), task_id)
+        return await asyncio.to_thread(replace)
     except KeyError:
         raise HTTPException(404, 'Task not found') from None
     except TaskAdmissionError as exc:
         raise HTTPException(exc.status_code, exc.detail) from None
-    if not account_id or not ciphertext:
-        raise HTTPException(409, 'Old task has no saved configuration; select courses and settings again')
-    try:
-        request = AccountTask.model_validate(json.loads(decrypt_str(ciphertext)))
-    except Exception:
-        raise HTTPException(409, 'Saved configuration unavailable; select courses and settings again') from None
-    return await start_task(account_id, request, owner)
+    except UnsafeEndpointError:
+        raise HTTPException(422, 'Invalid answer-provider endpoint configuration') from None
