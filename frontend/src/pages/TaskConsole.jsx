@@ -230,7 +230,7 @@ export default function TaskConsole() {
             {['blocked', 'claimed'].includes(task.auto_restart_state) && <p className="mt-3 text-sm text-text-muted">{task.auto_restart_state === 'claimed' ? '正在尝试自动重启。' : '自动重启未完成，请人工处理。'}</p>}
             <p className="mt-4 truncate font-semibold">{normalizeCourseText(progress.current_course) || '等待课程信息'}</p>
             <p className="mt-1 truncate text-sm text-text-muted">{normalizeCourseText(progress.current_chapter) || task.current_task || '准备中'}</p>
-            <div className="mt-4 space-y-3"><Progress label="课程进度" done={progress.completed} total={progress.total} /><Progress label="章节进度" done={progress.completed_chapters} total={progress.total_chapters} /></div>
+            <div className="mt-4 space-y-3"><Progress label="课程进度" done={progress.completed} total={progress.total} />{task.task_scope?.learn_chapters !== false && <Progress label="章节进度" done={progress.completed_chapters} total={progress.total_chapters} />}</div>
             {task.task_scope && <p className="mt-2 text-xs text-text-muted">任务范围：{[
               task.task_scope.learn_chapters && '章节学习', task.task_scope.course_homework && '课程作业',
               task.task_scope.course_exams && '课程考试',
