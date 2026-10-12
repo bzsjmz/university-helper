@@ -22,6 +22,7 @@ from .task_admission import (
     cleanup_task_records,
     count_active_tasks,
     is_active_status,
+    is_terminal_status,
     sort_task_records,
 )
 
@@ -278,13 +279,40 @@ class ChaoxingLearningManager:
             return self._task_public_payload(task)
 
     def list_tasks(self, user_id: str) -> list[dict[str, Any]]:
-        self._ensure_tasks_loaded_for_user(user_id)
+        normalized_user_id = str(user_id or "").strip()
+        if not normalized_user_id:
+            return []
+        self._ensure_tasks_loaded_for_user(normalized_user_id)
+        try:
+            stored_tasks = task_store.list_tasks(
+                task_kind=LEARNING_TASK_KIND,
+                user_id=normalized_user_id,
+                limit=USER_TASK_LOAD_LIMIT,
+            )
+        except Exception:
+            logger.warning("list persisted learning tasks failed", exc_info=True)
+            stored_tasks = []
+
         with self._lock:
             cleanup_task_records(self._tasks)
+            # Historical rows belong in the response, not the bounded worker
+            # registry. Live state wins over older database snapshots. Check
+            # deletion tombstones after the read so concurrent deletion/restart
+            # cannot resurrect an old row in a delayed list response.
+            records = {
+                str(item.get("task_id")): item
+                for item in stored_tasks
+                if item.get("task_id")
+                and str(item.get("user_id")) == normalized_user_id
+                and is_terminal_status(item.get("status"))
+                and str(item.get("task_id")) not in getattr(self, "_deleted_tasks", set())
+            }
+            records.update({
+                task_id: task for task_id, task in self._tasks.items()
+                if str(task.get("user_id")) == normalized_user_id
+            })
             tasks: list[dict[str, Any]] = []
-            for task in self._tasks.values():
-                if str(task.get("user_id")) != str(user_id):
-                    continue
+            for task in records.values():
                 public_task = self._task_public_payload(task)
                 public_task.pop("user_id", None)
                 started_at = (

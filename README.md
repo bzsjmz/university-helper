@@ -32,6 +32,21 @@ frontend. The repository is called `university-helper`, but some container
 names and env-var prefixes still use the old internal name `easy_learning`.
 We are renaming those over time.
 
+## How this fork differs from upstream
+
+[bzsjmz/university-helper](https://github.com/bzsjmz/university-helper) maintains server extensions based on [sweetcornna/university-helper](https://github.com/sweetcornna/university-helper) **v1.5.0** (`6c10c064`). These are source changes, not a claim that every deployment runs them. Later upstream versions are not synchronized automatically.
+
+| Area | Changes in this fork |
+| --- | --- |
+| Multiple accounts | Encrypted saved Chaoxing accounts per management user, independent tasks and duplicate-account protection; display-name editing, account deletion, per-account course selection, chapter-range previews and batch starts. |
+| Task controls and history | Aggregated console, details, pause/stop and terminal-record deletion; encrypted restart configuration preserves the original scope and reads platform progress. A successful restart replaces its old record. Persisted history remains visible after the two-hour memory-cache expiry. |
+| Failures and threads | Failed chapters yield to later chapters and stop after at most three attempts; repeated video HTTP 403 responses use bounded recovery. Answer budgets, cooperative cancellation and worker cleanup reduce prolonged waits. |
+| AI and answer costs | Server-side DeepSeek defaults and primary/fallback keys; concurrent identical-query coalescing, question-type/option-order-aware caching and no repeated paid generation after a blank or malformed HTTP 200 response. Private attempt/token-usage telemetry excludes questions, answers and keys. |
+| Providers and concurrency | Process-wide GO request spacing and throttle cooldown; new-task defaults of 1.5x speed, two chapter workers and LocalCache→AI. The application task-count cap can be disabled and chapter concurrency has no application maximum; container resource limits remain a deployment concern. |
+| Passive QQ status | A separate AstrBot plugin answers administrator `/任务状态` commands from owner-scoped sanitized snapshots, rejects stale data and does not push notifications or share database/authentication credentials. |
+
+Restarting creates new workers; it does not preserve execution threads across process restarts. Skipped failed chapters are not platform-confirmed completions. AI fallback may still incur charges on cache misses. Machine-specific credentials, runtime data, private operations configuration and backups are excluded from this repository. The inherited deployment and desktop instructions below refer to upstream capabilities; check actual fork releases for available prebuilt images and installers.
+
 ## Quick start
 
 ### Desktop app

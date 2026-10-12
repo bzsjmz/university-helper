@@ -291,3 +291,66 @@ def test_delete_storage_failure_keeps_record_and_restart_config(monkeypatch):
     monkeypatch.setattr(module.task_store, 'delete_task', lambda *args: False)
     with pytest.raises(RuntimeError): instance.delete_task('owner', 'old')
     assert instance.restart_config('owner', 'old') == ('a', 'fernet:config')
+
+
+@pytest.mark.parametrize("status", ["completed", "failed", "cancelled", "error"])
+def test_old_terminal_history_survives_memory_cleanup(monkeypatch, status):
+    instance = manager(monkeypatch)
+    instance._loaded_task_users.add("owner")
+    row = {"task_id": "old", "user_id": "owner", "status": status,
+           "updated_at": "2020-01-01T00:00:00Z", "account_id": "a",
+           "_restart_config": "fake-encrypted-config"}
+    instance._tasks["old"] = dict(row)
+    store = Mock(return_value=[row])
+    monkeypatch.setattr(module.task_store, "list_tasks", store)
+    for _ in range(2):
+        listed = instance.list_tasks("owner")
+        assert [item["task_id"] for item in listed] == ["old"]
+        assert listed[0]["can_restart"] is True
+        assert "_restart_config" not in listed[0] and "user_id" not in listed[0]
+        assert "old" not in instance._tasks
+    store.assert_called_with(task_kind=module.LEARNING_TASK_KIND, user_id="owner",
+                             limit=module.USER_TASK_LOAD_LIMIT)
+
+
+def test_history_merge_preserves_live_state_and_owner_scope(monkeypatch):
+    instance = manager(monkeypatch)
+    instance._loaded_task_users.add("owner")
+    instance._tasks["live"] = {"task_id": "live", "user_id": "owner", "status": "running"}
+    monkeypatch.setattr(module.task_store, "list_tasks", lambda **kwargs: [
+        {"task_id": "live", "user_id": "owner", "status": "failed"},
+        {"task_id": "foreign", "user_id": "other-owner", "status": "failed"},
+        {"task_id": "stale-running", "user_id": "owner", "status": "running"},
+    ])
+    listed = instance.list_tasks("owner")
+    assert [(item["task_id"], item["status"]) for item in listed] == [("live", "running")]
+
+
+def test_delayed_history_read_does_not_resurrect_deleted_record(monkeypatch):
+    instance = manager(monkeypatch)
+    instance._loaded_task_users.add("owner")
+    instance._deleted_tasks = set()
+    reading = threading.Event()
+    release = threading.Event()
+
+    def read(**kwargs):
+        reading.set()
+        assert release.wait(2)
+        return [{"task_id": "old", "user_id": "owner", "status": "failed"}]
+
+    monkeypatch.setattr(module.task_store, "list_tasks", read)
+    with ThreadPoolExecutor(1) as pool:
+        response = pool.submit(instance.list_tasks, "owner")
+        assert reading.wait(2)
+        with instance._lock:
+            instance._deleted_tasks.add("old")
+        release.set()
+        assert response.result(timeout=2) == []
+
+
+def test_history_read_failure_preserves_live_tasks(monkeypatch):
+    instance = manager(monkeypatch)
+    instance._loaded_task_users.add("owner")
+    instance._tasks["live"] = {"task_id": "live", "user_id": "owner", "status": "running"}
+    monkeypatch.setattr(module.task_store, "list_tasks", Mock(side_effect=RuntimeError("offline")))
+    assert instance.list_tasks("owner")[0]["status"] == "running"
