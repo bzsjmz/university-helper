@@ -376,12 +376,17 @@ def _process_jobs_inline(
     return None
 
 
-@dataclass(order=True)
+@dataclass
 class ChapterTask:
     index: int
     point: dict[str, Any]
     result: ChapterResult = ChapterResult.PENDING
     tries: int = 0
+
+    def __lt__(self, other: "ChapterTask") -> bool:
+        # Retries yield to chapters with fewer attempts. Never compare point
+        # dictionaries; only immutable-in-queue scheduling fields are used.
+        return (self.tries, self.index) < (other.tries, other.index)
 
 
 class JobProcessor:
@@ -619,62 +624,67 @@ class JobProcessor:
                 self._release_pending_retry()
 
     def _run_inline(self) -> None:
-        for task in sorted(self.tasks, key=lambda item: item.index):
-            while True:
-                if should_stop(self.config):
+        pending: PriorityQueue[ChapterTask] = PriorityQueue()
+        for task in self.tasks:
+            pending.put(task)
+        while not pending.empty():
+            task = pending.get_nowait()
+            if should_stop(self.config):
+                self._drain_pending_tasks()
+                return
+
+            try:
+                task.result = process_chapter(self.chaoxing, self.course, task.point, self.speed, self.config)
+            except Exception:
+                logger.exception("Chapter processing crashed: {}", task.point.get("title", "unknown"))
+                task.result = ChapterResult.ERROR
+
+            match task.result:
+                case ChapterResult.SUCCESS:
+                    logger.debug("Task success: {}", task.point["title"])
+                    continue
+
+                case ChapterResult.NOT_OPEN:
+                    if self.config["notopen_action"] == "continue":
+                        logger.warning("章节未开启: {}, 正在跳过", task.point["title"])
+                        continue
+
+                    task.tries += 1
+                    if task.tries >= self.max_tries:
+                        logger.error(
+                            "章节未开启: {} 可能由于上一章节的章节检测未完成, 也可能由于该章节因为时效已关闭，"
+                            "请手动检查完成并提交再重试。或者在配置中配置(自动跳过关闭章节/开启题库并启用提交)",
+                            task.point["title"],
+                        )
+                        self.failed_tasks.append(task)
+                        continue
+                    if self._wait_retry(task):
+                        pending.put(task)
+
+                case ChapterResult.ERROR:
+                    task.tries += 1
+                    logger.warning(
+                        "Retrying task {} ({}/{} attempts)",
+                        task.point["title"],
+                        task.tries,
+                        self.max_tries,
+                    )
+                    if task.tries >= self.max_tries:
+                        logger.error("Max retries reached for task: {}", task.point["title"])
+                        self.failed_tasks.append(task)
+                        continue
+                    if self._wait_retry(task):
+                        pending.put(task)
+
+                case ChapterResult.CANCELLED:
+                    logger.info("Task cancelled: {}", task.point["title"])
                     self._drain_pending_tasks()
                     return
 
-                try:
-                    task.result = process_chapter(self.chaoxing, self.course, task.point, self.speed, self.config)
-                except Exception:
-                    logger.exception("Chapter processing crashed: {}", task.point.get("title", "unknown"))
-                    task.result = ChapterResult.ERROR
-
-                match task.result:
-                    case ChapterResult.SUCCESS:
-                        logger.debug("Task success: {}", task.point["title"])
-                        break
-
-                    case ChapterResult.NOT_OPEN:
-                        if self.config["notopen_action"] == "continue":
-                            logger.warning("章节未开启: {}, 正在跳过", task.point["title"])
-                            break
-
-                        task.tries += 1
-                        if task.tries >= self.max_tries:
-                            logger.error(
-                                "章节未开启: {} 可能由于上一章节的章节检测未完成, 也可能由于该章节因为时效已关闭，"
-                                "请手动检查完成并提交再重试。或者在配置中配置(自动跳过关闭章节/开启题库并启用提交)",
-                                task.point["title"],
-                            )
-                            self.failed_tasks.append(task)
-                            break
-                        self._wait_retry(task)
-
-                    case ChapterResult.ERROR:
-                        task.tries += 1
-                        logger.warning(
-                            "Retrying task {} ({}/{} attempts)",
-                            task.point["title"],
-                            task.tries,
-                            self.max_tries,
-                        )
-                        if task.tries >= self.max_tries:
-                            logger.error("Max retries reached for task: {}", task.point["title"])
-                            self.failed_tasks.append(task)
-                            break
-                        self._wait_retry(task)
-
-                    case ChapterResult.CANCELLED:
-                        logger.info("Task cancelled: {}", task.point["title"])
-                        self._drain_pending_tasks()
-                        return
-
-                    case _:
-                        logger.error("Invalid task state {} for task {}", task.result, task.point["title"])
-                        self.failed_tasks.append(task)
-                        break
+                case _:
+                    logger.error("Invalid task state {} for task {}", task.result, task.point["title"])
+                    self.failed_tasks.append(task)
+                    continue
 
     def _drain_pending_tasks(self):
         with self._drain_lock:

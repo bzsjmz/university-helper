@@ -198,3 +198,55 @@ def test_video_progress_success_does_not_log_response_body(monkeypatch, rt, stat
     for secret in (body_secret, dtoken):
         assert secret not in raw_log_text
         assert secret not in formatted_logs
+
+
+def _forbidden_video_service(monkeypatch):
+    session_manager = Mock()
+    session_manager.get_session.return_value.get.return_value.json.return_value = {
+        "status": "success", "dtoken": "fake", "crc": "fake", "key": "fake", "duration": 3600,
+    }
+    service = ChaoxingVideoService(lambda: "fid", lambda: "uid", Mock(), Mock(), session_manager)
+    monkeypatch.setattr(video_module, "tqdm", Mock())
+    service.video_progress_log = Mock(return_value=(False, 403))
+    service._recover_after_forbidden = Mock(return_value=None)
+    return service
+
+
+def test_repeated_403_exits_without_waiting_for_video_playback(monkeypatch):
+    service = _forbidden_video_service(monkeypatch)
+    monkeypatch.setattr(video_module.random, "uniform", lambda *args: 0)
+    sleep = Mock()
+    monkeypatch.setattr(video_module.time, "sleep", sleep)
+    result = service.study_video({}, {"objectid": "fake", "playTime": 0, "name": "fake"}, {})
+    assert result == video_module.StudyResult.FORBIDDEN
+    assert service.video_progress_log.call_count == 1 + video_module.MAX_FORBIDDEN_RETRY
+    assert service._recover_after_forbidden.call_count == video_module.MAX_FORBIDDEN_RETRY
+    sleep.assert_not_called()
+
+
+def test_403_recovery_can_succeed_without_waiting_for_playback(monkeypatch):
+    service = _forbidden_video_service(monkeypatch)
+    service.video_progress_log.side_effect = [(False, 403), (True, 200)]
+    service._recover_after_forbidden.return_value = {"dtoken": "new-fake", "duration": 3600}
+    monkeypatch.setattr(video_module.random, "uniform", lambda *args: 0)
+    result = service.study_video({}, {"objectid": "fake", "playTime": 0, "name": "fake"}, {})
+    assert result == video_module.StudyResult.SUCCESS
+    assert service.video_progress_log.call_count == 2
+    assert service.video_progress_log.call_args.args[4] == "new-fake"
+
+
+def test_stop_interrupts_403_recovery_backoff(monkeypatch):
+    service = _forbidden_video_service(monkeypatch)
+    stopped = False
+
+    def sleep(_delay):
+        nonlocal stopped
+        stopped = True
+
+    monkeypatch.setattr(video_module.time, "sleep", sleep)
+    monkeypatch.setattr(video_module.random, "uniform", lambda *args: 2)
+    result = service.study_video({}, {"objectid": "fake", "playTime": 0, "name": "fake"}, {},
+                                 should_stop=lambda: stopped)
+    assert result == video_module.StudyResult.CANCELLED
+    service._recover_after_forbidden.assert_not_called()
+    assert service.video_progress_log.call_count == 1

@@ -289,40 +289,52 @@ class ChaoxingVideoService:
         while not passed:
             if callable(should_stop) and should_stop():
                 return StudyResult.CANCELLED
+            if state == 403:
+                if forbidden_retry >= max_forbidden_retry:
+                    logger.warning("403重试失败, 跳过当前任务")
+                    return StudyResult.FORBIDDEN
+                forbidden_retry += 1
+                logger.warning(
+                    "出现403报错, 正在尝试刷新会话状态 (第{}次)",
+                    forbidden_retry,
+                )
+                retry_deadline = time.monotonic() + random.uniform(2, 4)
+                while time.monotonic() < retry_deadline:
+                    if callable(should_stop) and should_stop():
+                        return StudyResult.CANCELLED
+                    time.sleep(max(0, min(0.2, retry_deadline - time.monotonic())))
+                refreshed_meta = self._recover_after_forbidden(_session, _job, _type)
+                if refreshed_meta:
+                    _dtoken = refreshed_meta.get("dtoken", _dtoken)
+                    # 应用刷新后的 duration（之前赋值到死变量 _duration，
+                    # 导致后续上报继续使用过期的 duration，参数自相矛盾）。
+                    refreshed_duration = refreshed_meta.get("duration", duration)
+                    try:
+                        duration = int(refreshed_duration)
+                    except (TypeError, ValueError):
+                        logger.debug("刷新返回的 duration 非法，沿用旧值: {}", refreshed_duration)
+                    play_time = refreshed_meta.get("playTime", play_time)
+                    # duration 变化后重置饱和计数，避免误判。
+                    saturated_reports = 0
+
+                    logger.debug("Refreshed session: duration={}, play_time={}", duration, play_time)
+
+                passed, state = self.video_progress_log(
+                    _session, _course, _job, _job_info, _dtoken, duration, int(play_time), _type, headers=headers
+                )
+                last_iter = time.time()
+                continue
+
+            elif not passed and state != 200:
+                return StudyResult.ERROR
+
             if play_time - last_log_time >= wait_time or play_time == duration:
                 passed, state = self.video_progress_log(
                     _session, _course, _job, _job_info, _dtoken, duration, int(play_time), _type, headers=headers
                 )
 
-                if state == 403:
-                    if forbidden_retry >= max_forbidden_retry:
-                        logger.warning("403重试失败, 跳过当前任务")
-                        return StudyResult.FORBIDDEN
-                    forbidden_retry += 1
-                    logger.warning(
-                        "出现403报错, 正在尝试刷新会话状态 (第{}次)",
-                        forbidden_retry,
-                    )
-                    time.sleep(random.uniform(2, 4))
-                    refreshed_meta = self._recover_after_forbidden(_session, _job, _type)
-                    if refreshed_meta:
-                        _dtoken = refreshed_meta.get("dtoken", _dtoken)
-                        # 应用刷新后的 duration（之前赋值到死变量 _duration，
-                        # 导致后续上报继续使用过期的 duration，参数自相矛盾）。
-                        refreshed_duration = refreshed_meta.get("duration", duration)
-                        try:
-                            duration = int(refreshed_duration)
-                        except (TypeError, ValueError):
-                            logger.debug("刷新返回的 duration 非法，沿用旧值: {}", refreshed_duration)
-                        play_time = refreshed_meta.get("playTime", play_time)
-                        # duration 变化后重置饱和计数，避免误判。
-                        saturated_reports = 0
-
-                        logger.debug("Refreshed session: duration={}, play_time={}", duration, play_time)
-                        continue
-
-                elif not passed and state != 200:
-                    return StudyResult.ERROR
+                if state != 200:
+                    continue
 
                 # F46: 服务器持续 200 但 isPassed=False，且进度已经饱和到 duration。
                 # 这种情况下后续每次循环都会立即再次上报，永远无法跳出，需设上限。

@@ -6,6 +6,8 @@ JobProcessor.run() actually terminates once retried chapters succeed/exhaust.
 """
 
 import threading
+
+import pytest
 from types import SimpleNamespace
 
 from app.services.course.chaoxing import learning
@@ -259,3 +261,46 @@ def test_process_chapter_runs_jobs_inline_when_executor_cannot_start(monkeypatch
 
     assert result == ChapterResult.SUCCESS
     assert processed_jobs == ["job-1", "job-2"]
+
+
+@pytest.mark.parametrize("inline", [False, True])
+@pytest.mark.parametrize("failure", [ChapterResult.ERROR, ChapterResult.NOT_OPEN])
+def test_failed_chapters_yield_to_unattempted_chapters(monkeypatch, inline, failure):
+    calls = []
+
+    def process(_client, _course, point, _speed, _config):
+        calls.append(point["title"])
+        return failure if point["title"] == "bad" else ChapterResult.SUCCESS
+
+    monkeypatch.setattr(learning, "process_chapter", process)
+    tasks = [ChapterTask(index=i, point={"title": title})
+             for i, title in enumerate(["bad", "next", "last"])]
+    processor = JobProcessor(object(), {}, tasks, _base_config())
+    monkeypatch.setattr(processor, "_wait_retry", lambda *args: True)
+    if inline:
+        processor._run_inline()
+    else:
+        assert _run_with_timeout(processor)
+        assert all(not thread.is_alive() for thread in processor.threads)
+        assert processor.task_queue.unfinished_tasks == 0
+        assert processor.retry_queue.unfinished_tasks == 0
+    assert calls == ["bad", "next", "last", "bad", "bad"]
+    assert processor.failed_tasks == [tasks[0]]
+
+
+def test_retries_rotate_between_failed_chapters(monkeypatch):
+    calls = []
+
+    def process(_client, _course, point, _speed, _config):
+        calls.append(point["title"])
+        return ChapterResult.ERROR
+
+    monkeypatch.setattr(learning, "process_chapter", process)
+    processor = JobProcessor(object(), {}, [
+        ChapterTask(index=0, point={"title": "first"}),
+        ChapterTask(index=1, point={"title": "second"}),
+    ], _base_config())
+    monkeypatch.setattr(processor, "_wait_retry", lambda *args: True)
+    processor._run_inline()
+    assert calls == ["first", "second"] * 3
+    assert len(processor.failed_tasks) == 2
