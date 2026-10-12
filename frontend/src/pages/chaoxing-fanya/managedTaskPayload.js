@@ -1,5 +1,7 @@
 export function managedTaskPayload(config, courseIds, chapterLimits) {
   return {
+    learn_chapters: config.learnChapters ?? true,
+    course_homework: config.courseHomework ?? false, course_exams: config.courseExams ?? false,
     course_ids: [...courseIds], chapter_limits: { ...chapterLimits },
     speed: config.speed, concurrency: config.concurrency, unopened_strategy: config.unopenedStrategy,
     tiku_config: {

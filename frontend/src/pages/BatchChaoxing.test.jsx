@@ -119,3 +119,19 @@ test('double confirmation sends one request and settings changes invalidate the 
   await act(async () => { resolve({ task_id: 'new-task' }) })
   expect(JSON.parse(mocks.api.mock.calls.find(([path]) => path === '/learning-accounts/a/tasks')[1].body).concurrency).toBe(3)
 })
+
+
+test('assessment-only scope is visible in preview and submitted exactly as reviewed', async () => {
+  const { user, view, refreshTasks } = await setup()
+  await user.click(article('账号甲').getByRole('checkbox', { name: /甲的共同课程/ }))
+  const assessmentConfig = { ...config, learnChapters: false, courseHomework: true, courseExams: true }
+  view.rerender(<BatchChaoxing accounts={accounts} tasks={active} config={assessmentConfig} refreshTasks={refreshTasks} />)
+  await user.click(screen.getByRole('button', { name: '预览启动清单（1 个账号）' }))
+  const review = within(screen.getByLabelText('启动确认清单'))
+  expect(review.getByText(/任务范围：课程作业（整个所选课程）、课程考试（整个所选课程）/)).toBeInTheDocument()
+  expect(review.getByText(/甲的共同课程 · 不执行章节学习/)).toBeInTheDocument()
+  await user.click(review.getByRole('button', { name: '确认启动 1 个账号' }))
+  await screen.findByText(/启动请求成功 1 个/)
+  const start = mocks.api.mock.calls.find(([path, options]) => path === '/learning-accounts/a/tasks' && options?.method === 'POST')
+  expect(JSON.parse(start[1].body)).toMatchObject({ learn_chapters: false, course_homework: true, course_exams: true })
+})

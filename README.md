@@ -32,6 +32,8 @@ frontend. The repository is called `university-helper`, but some container
 names and env-var prefixes still use the old internal name `easy_learning`.
 We are renaming those over time.
 
+Course assignment/exam scopes are opt-in and can run without chapters. They cover eligible unsubmitted items in selected courses, regardless of chapter limits. Only ordinary assignment papers and per-question exams are handled; verification/proctoring and unsupported layouts remain manual. Incomplete answers are saved without random fallback. Exam timers may continue while paused. Mock tests do not establish compatibility with every live course.
+
 ## How this fork differs from upstream
 
 [bzsjmz/university-helper](https://github.com/bzsjmz/university-helper) maintains server extensions based on [sweetcornna/university-helper](https://github.com/sweetcornna/university-helper) **v1.5.0** (`6c10c064`). These are source changes, not a claim that every deployment runs them. Later upstream versions are not synchronized automatically.
@@ -39,6 +41,7 @@ We are renaming those over time.
 | Area | Changes in this fork |
 | --- | --- |
 | Multiple accounts | Encrypted saved Chaoxing accounts per management user, independent tasks and duplicate-account protection; display-name editing, account deletion, per-account course selection, chapter-range previews and batch starts. |
+| Course assignments and exams | Separate opt-in scopes for chapters, assignments, and exams, including courses with no chapters. Only chapters are enabled by default. Uses the selected answer sources and save/submit mode, with separate result counts. |
 | Task controls and history | Aggregated console, details, pause/stop and terminal-record deletion; encrypted restart configuration preserves the original scope and reads platform progress. A successful restart replaces its old record. Persisted history remains visible after the two-hour memory-cache expiry. After a first failure, managed tasks restart once after one hour with their original settings; another failure requires manual action. Existing unscheduled failures are not enrolled. |
 | Failures and threads | Failed chapters yield to later chapters and stop after at most three attempts; repeated video HTTP 403 responses use bounded recovery. Answer budgets, cooperative cancellation and worker cleanup reduce prolonged waits. |
 | AI and answer costs | Server-side DeepSeek defaults and primary/fallback keys; concurrent identical-query coalescing, question-type/option-order-aware caching and no repeated paid generation after a blank or malformed HTTP 200 response. Private attempt/token-usage telemetry excludes questions, answers and keys. |

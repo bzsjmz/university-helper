@@ -4,6 +4,10 @@ import { useState } from 'react'
 export default function useTaskConfig() {
 
 
+  const [learnChapters, setLearnChapters] = useState(true)
+  const [courseHomework, setCourseHomework] = useState(false)
+  const [courseExams, setCourseExams] = useState(false)
+
   const [speed, setSpeed] = useState(1.5)
 
 
@@ -40,6 +44,9 @@ export default function useTaskConfig() {
 
 
   return {
+    learnChapters, setLearnChapters,
+    courseHomework, setCourseHomework,
+    courseExams, setCourseExams,
     speed, setSpeed,
     concurrency, setConcurrency,
     unopenedStrategy, setUnopenedStrategy,

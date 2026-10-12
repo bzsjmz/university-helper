@@ -37,6 +37,7 @@ export default function BatchChaoxing({ accounts, tasks, config, refreshTasks, o
   }
   const selectedAccounts = accounts.filter(account => selected.includes(account.id))
   const readyAccounts = selectedAccounts.filter(account => !locked(account.id) && rows[account.id]?.phase === 'ready'
+    && (config.learnChapters !== false || config.courseHomework || config.courseExams)
     && rows[account.id].selected.length > 0 && rows[account.id].selected.length <= 100)
 
   const loadAccount = async id => {
@@ -99,7 +100,7 @@ export default function BatchChaoxing({ accounts, tasks, config, refreshTasks, o
         courses: row.courses.filter(course => ids.includes(getCourseId(course))).map(course => {
           const id = getCourseId(course)
           const chapter = (row.chapters[id] || []).find(item => getChapterId(item) === limits[id])
-          return { name: getCourseName(course), limit: limits[id] ? `学到 ${chapter ? getChapterTitle(chapter) : limits[id]}（含）` : '全部章节' }
+          return { name: getCourseName(course), limit: config.learnChapters === false ? '不执行章节学习' : limits[id] ? `学到 ${chapter ? getChapterTitle(chapter) : limits[id]}（含）` : '全部章节' }
         }),
       }
     }).filter(item => item.payload.course_ids.length > 0))
@@ -184,6 +185,11 @@ export default function BatchChaoxing({ accounts, tasks, config, refreshTasks, o
     {busy && <p role="status" className="mt-3">正在逐个处理，请等待当前操作完成…</p>}
     {review && <div className="mt-5 rounded-xl border border-primary p-4" aria-label="启动确认清单">
       <h3 className="font-semibold">确认本次课程范围</h3>
+      <p className="my-2 text-sm">任务范围：{[
+        review[0]?.payload.learn_chapters && '章节学习（含章节测试）',
+        review[0]?.payload.course_homework && '课程作业（整个所选课程）',
+        review[0]?.payload.course_exams && '课程考试（整个所选课程）',
+      ].filter(Boolean).join('、')}</p>
       <p className="my-2 text-sm">{review[0]?.payload.speed} 倍速 · 每账号 {review[0]?.payload.concurrency} 章节并发 · {review[0]?.payload.tiku_config.provider.split(',').filter(Boolean).map(name => PROVIDERS[name] || name).join(' → ') || '未启用题库'}</p>
       <p className="mb-3 text-xs text-text-muted">本地缓存始终优先查询。缓存未命中时，AI 作答可能产生费用。</p>
       <ul className="space-y-3">{review.map(item => <li key={item.account.id}>

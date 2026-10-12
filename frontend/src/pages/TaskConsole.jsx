@@ -231,6 +231,13 @@ export default function TaskConsole() {
             <p className="mt-4 truncate font-semibold">{normalizeCourseText(progress.current_course) || '等待课程信息'}</p>
             <p className="mt-1 truncate text-sm text-text-muted">{normalizeCourseText(progress.current_chapter) || task.current_task || '准备中'}</p>
             <div className="mt-4 space-y-3"><Progress label="课程进度" done={progress.completed} total={progress.total} /><Progress label="章节进度" done={progress.completed_chapters} total={progress.total_chapters} /></div>
+            {task.task_scope && <p className="mt-2 text-xs text-text-muted">任务范围：{[
+              task.task_scope.learn_chapters && '章节学习', task.task_scope.course_homework && '课程作业',
+              task.task_scope.course_exams && '课程考试',
+            ].filter(Boolean).join('、')}</p>}
+            {(task.task_scope?.course_homework || task.task_scope?.course_exams) && <p className="mt-2 text-xs text-text-muted">
+              作业／考试：已提交 {toNum(progress.assessments_submitted)} · 已保存 {toNum(progress.assessments_saved)} · 已跳过 {toNum(progress.assessments_skipped)} · 未完成 {toNum(progress.assessments_failed)}
+            </p>}
             <p className="mt-3 text-xs text-text-muted">失败课程 {toNum(progress.failed)} · 更新 {time(task.updated_at)}</p>
             <p className="mt-1 truncate text-xs text-text-muted" title={task.task_id}>任务 {task.task_id}</p>
             <div className="mt-4 flex flex-wrap gap-2">

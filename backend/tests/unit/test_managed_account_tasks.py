@@ -180,6 +180,7 @@ async def test_restart_decrypts_config_and_uses_current_saved_account_credential
     monkeypatch.setattr(api, 'encrypt_str', lambda value: 'fernet:' + cipher.encrypt(value.encode()).decode())
     monkeypatch.setattr(api, 'decrypt_str', lambda value: cipher.decrypt(value[7:].encode()).decode())
     config = api.AccountTask(course_ids=['course-a'], concurrency=4, chapter_limits={'course-a': 'chapter-5'},
+                             learn_chapters=False, course_homework=True, course_exams=True,
                              tiku_config={'token': 'test-token'}).model_dump(exclude={'username', 'password'})
     encrypted = api.encrypt_str(json.dumps(config))
     instance = Mock()
@@ -192,6 +193,7 @@ async def test_restart_decrypts_config_and_uses_current_saved_account_credential
     assert (await api.restart_task('old-task', 'owner'))['task_id'] == 'new-task'
     sent = instance.start_task.call_args.args[1]
     assert sent['concurrency'] == 4 and sent['chapter_limits'] == {'course-a': 'chapter-5'}
+    assert sent['learn_chapters'] is False and sent['course_homework'] is True and sent['course_exams'] is True
     assert sent['password'] == 'rotated-password' and sent['tiku_config']['token'] == 'test-token'
     assert 'test-token' not in sent['_restart_config']
     instance.restart_config.return_value = ('a', None)

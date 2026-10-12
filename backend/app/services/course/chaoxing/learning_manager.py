@@ -14,6 +14,7 @@ from ..task_store import task_store
 from .endpoint_security import validate_tiku_config
 from .learning import ChapterTask, JobProcessor, init_chaoxing
 from .payload_mapper import normalize_tiku_config
+from .course_assessments import CourseAssessmentService
 from . import query_control as control
 from .task_admission import (
     MAX_ACTIVE_TASKS,
@@ -184,6 +185,12 @@ class ChaoxingLearningManager:
         # detail-free exception to a 4xx response; direct callers get the same
         # fail-closed behavior.
         validate_tiku_config((payload or {}).get("tiku_config"))
+        for key in ("learn_chapters", "course_homework", "course_exams"):
+            if key in (payload or {}) and type(payload[key]) is not bool:
+                raise ValueError("Task scope flags must be booleans")
+        if not any((payload or {}).get(key, default) is True for key, default in
+                   (("learn_chapters", True), ("course_homework", False), ("course_exams", False))):
+            raise ValueError("Select at least one task scope")
 
         normalized_user_id = str(user_id or "").strip()
         account_id = str((payload or {}).get("account_id") or "")
@@ -217,6 +224,9 @@ class ChaoxingLearningManager:
                 "account_key": account_key or None,
                 "account_label": str((payload or {}).get("account_label") or ""),
                 "account_name": str((payload or {}).get("account_name") or ""),
+                "task_scope": {"learn_chapters": payload.get("learn_chapters", True),
+                               "course_homework": payload.get("course_homework", False),
+                               "course_exams": payload.get("course_exams", False)},
                 "status": "pending",
                 "message": "Task created",
                 "current_task": "preparing",
@@ -640,16 +650,16 @@ class ChaoxingLearningManager:
             )
             self._append_task_log(task_id, f"Start course: {course_name}", "info")
 
-            try:
-                points_payload = chaoxing.get_course_point(course["courseId"], course["clazzId"], course["cpi"])
-                points = list(points_payload.get("points") or [])
-            except Exception as exc:
-                failed_courses += 1
-                self._append_task_log(task_id, f"Fetch chapters failed for {course_name}: {exc}", "error")
-                self._update_progress(task_id, failed=failed_courses, current=index)
-                continue
-
-            end_point_id = _chapter_limit_for(course, chapter_limits)
+            points = []
+            chapter_fetch_failed = False
+            if payload.get("learn_chapters", True):
+                try:
+                    points_payload = chaoxing.get_course_point(course["courseId"], course["clazzId"], course["cpi"])
+                    points = list(points_payload.get("points") or [])
+                except Exception as exc:
+                    chapter_fetch_failed = True
+                    self._append_task_log(task_id, f"Fetch chapters failed for {course_name}: {exc}", "error")
+            end_point_id = _chapter_limit_for(course, chapter_limits) if payload.get("learn_chapters", True) else None
             if end_point_id:
                 limited_points = _points_up_to(points, end_point_id)
                 if limited_points is None:
@@ -729,16 +739,36 @@ class ChaoxingLearningManager:
             run_config["should_stop"] = stop_event.is_set
 
             try:
-                processor = JobProcessor(chaoxing, course, chapter_tasks, run_config)
-                processor.run()
+                failed_chapters = []
+                if payload.get("learn_chapters", True) and chapter_tasks:
+                    processor = JobProcessor(chaoxing, course, chapter_tasks, run_config)
+                    processor.run()
+                    failed_chapters = processor.failed_tasks
+                assessment_failed = False
+                if payload.get("course_homework") or payload.get("course_exams"):
+                    def assessment_checkpoint():
+                        if not self._wait_for_resume(task_id, pause_event, stop_event):
+                            raise control.QueryCancelled()
+                        return False
+                    def assessment_report(message, level):
+                        self._update_task(task_id, current_task="course-assessment", message=message)
+                        self._append_task_log(task_id, message, level)
+                    summary = CourseAssessmentService(chaoxing).run(
+                        course, homework=payload.get("course_homework", False),
+                        exams=payload.get("course_exams", False),
+                        checkpoint=assessment_checkpoint, report=assessment_report)
+                    for key, value in summary.items():
+                        self._increase_progress(task_id, "assessments_" + key, value)
+                    assessment_failed = bool(summary["failed"])
+
                 if stop_event.is_set():
                     self._cancel_task(task_id, "Task cancelled by user")
                     return
-                if processor.failed_tasks:
+                if failed_chapters or assessment_failed or chapter_fetch_failed:
                     failed_courses += 1
                     self._append_task_log(
                         task_id,
-                        f"Course finished with {len(processor.failed_tasks)} failed chapters: {course_name}",
+                        f"Course finished with {len(failed_chapters)} failed chapters or unfinished assessments: {course_name}",
                         "warning",
                     )
                 else:

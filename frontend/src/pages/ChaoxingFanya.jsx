@@ -153,6 +153,10 @@ function LegacyChaoxingFanya() {
 
 
   const startTask = useCallback(async () => {
+    if (!(taskConfig.learnChapters || taskConfig.courseHomework || taskConfig.courseExams)) {
+      auth.setError('请至少勾选一种任务范围。')
+      return
+    }
     auth.setError('')
     auth.setNotice('')
 
@@ -181,6 +185,9 @@ function LegacyChaoxingFanya() {
         method: 'POST',
         body: JSON.stringify({
           platform: 'chaoxing',
+          learn_chapters: taskConfig.learnChapters,
+          course_homework: taskConfig.courseHomework,
+          course_exams: taskConfig.courseExams,
           username: auth.username.trim(),
           password: auth.password,
           course_ids: validSelectedCourses,

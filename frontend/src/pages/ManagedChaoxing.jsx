@@ -175,7 +175,7 @@ export default function ManagedChaoxing() {
   }
 
   const startTask = async () => {
-    if (!accountId || activeTask || !selectedCourses.length || loading) return
+    if (!accountId || activeTask || !selectedCourses.length || loading || !(config.learnChapters || config.courseHomework || config.courseExams)) return
     setLoading(true)
     setError('')
     try {
@@ -267,7 +267,7 @@ export default function ManagedChaoxing() {
           if (value) setSelectedCourses(previous => previous.includes(id) ? previous : [...previous, id])
         }} />
       <ConfigSection {...config} />
-      <button type="button" disabled={loading || Boolean(activeTask) || !selectedCourses.length} onClick={() => { void startTask() }}
+      <button type="button" disabled={loading || Boolean(activeTask) || !selectedCourses.length || !(config.learnChapters || config.courseHomework || config.courseExams)} onClick={() => { void startTask() }}
         className="rounded-xl bg-primary px-6 py-3 text-white disabled:opacity-40">{activeTask ? '此账号已有任务，可切换其他账号' : '为所选账号启动任务'}</button>
     </>}
     {selectedTask && <>

@@ -159,3 +159,45 @@ def test_most_specific_limit_wins_when_selectors_overlap(worker):
     )
 
     assert processed == {"100": ["p1", "p2", "p3"]}
+
+
+@pytest.mark.parametrize('flags', [dict(course_homework=True), dict(course_exams=True)])
+def test_assessment_only_skips_chapter_fetch_and_ignores_saved_chapter_limit(worker, monkeypatch, flags):
+    client = FakeChaoxing()
+    def unexpected(*args):
+        raise AssertionError("Assessment-only must not query chapters")
+    client.get_course_point = unexpected
+    monkeypatch.setattr(lm, 'init_chaoxing', lambda *_: client)
+    calls = []
+    class Assessment:
+        def __init__(self, cx):
+            assert cx is client
+        def run(self, course, **kwargs):
+            calls.append((course['courseId'], kwargs['homework'], kwargs['exams']))
+            return {'submitted': 1, 'saved': 0, 'skipped': 0, 'failed': 0}
+    monkeypatch.setattr(lm, 'CourseAssessmentService', Assessment)
+    task, processed = worker(course_ids=['100_200_300'], learn_chapters=False,
+                             chapter_limits={'100_200_300': 'gone'}, **flags)
+    assert not processed
+    assert calls == [('100', flags.get('course_homework', False), flags.get('course_exams', False))]
+    assert task['status'] == 'completed'
+    assert task['progress']['assessments_submitted'] == 1
+    assert task['progress']['total_chapters'] == 0
+
+
+def test_course_without_chapters_still_runs_enabled_assessments(worker, monkeypatch):
+    client = FakeChaoxing()
+    client.get_course_point = lambda *_: {'points': []}
+    monkeypatch.setattr(lm, 'init_chaoxing', lambda *_: client)
+    calls = []
+    class Assessment:
+        def __init__(self, _): pass
+        def run(self, course, **kwargs):
+            calls.append(course['courseId'])
+            return {'submitted': 0, 'saved': 0, 'skipped': 0, 'failed': 1}
+    monkeypatch.setattr(lm, 'CourseAssessmentService', Assessment)
+    task, processed = worker(course_ids=['100_200_300'], course_homework=True)
+    assert calls == ['100'] and not processed
+    assert task['status'] == 'failed'
+    assert task['progress']['failed'] == 1
+    assert task['progress']['assessments_failed'] == 1

@@ -7,7 +7,7 @@ from typing import Annotated, Any
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field, StringConstraints, field_validator
+from pydantic import BaseModel, Field, StringConstraints, field_validator, model_validator, StrictBool
 
 from app.dependencies import get_current_user
 from app.services.course.chaoxing.course_portal_service import chaoxing_course_portal_service
@@ -58,11 +58,21 @@ class CourseStartRequest(BaseModel):
     # Course selector (same format as course_ids) -> id of the last chapter to
     # study, inclusive. Courses without an entry are studied in full.
     chapter_limits: Annotated[dict[_ChapterLimitKey, _ChapterLimitValue], Field(max_length=100)] | None = None
+    learn_chapters: StrictBool = True
+    course_homework: StrictBool = False
+    course_exams: StrictBool = False
     speed: float = 1.0
     concurrency: int = 4
     unopened_strategy: str = "retry"
     tiku_config: dict | None = None
     notify_config: dict | None = None
+
+
+    @model_validator(mode="after")
+    def validate_task_scope(self):
+        if not (self.learn_chapters or self.course_homework or self.course_exams):
+            raise ValueError("Select at least one task scope")
+        return self
 
 
 class CourseStatusResponse(BaseModel):
@@ -208,6 +218,9 @@ async def start_course_learning(
                 "password": request.password,
                 "course_ids": request.course_ids or [],
                 "chapter_limits": request.chapter_limits or {},
+                "learn_chapters": request.learn_chapters,
+                "course_homework": request.course_homework,
+                "course_exams": request.course_exams,
                 "speed": request.speed,
                 "concurrency": request.concurrency,
                 "unopened_strategy": request.unopened_strategy,

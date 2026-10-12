@@ -7,7 +7,6 @@ import ManagedChaoxing from './ManagedChaoxing'
 const mocks = vi.hoisted(() => ({ api: vi.fn() }))
 vi.mock('../utils/api', () => ({ api: mocks.api }))
 vi.mock('../components', () => ({ StatusBadge: ({ status }) => <span>{status}</span> }))
-vi.mock('./chaoxing-fanya/components/ConfigSection', () => ({ default: () => null }))
 vi.mock('./chaoxing-fanya/components/LogSection', () => ({ default: () => null }))
 vi.mock('./chaoxing-fanya/components/CourseListSection', () => ({
   default: ({ courses, setSelectedCourses }) => <button onClick={() => setSelectedCourses([courses[0].courseId])}>选择 {courses[0].name}</button>,
@@ -99,4 +98,25 @@ test('saved account display name can be edited and refreshed without changing cr
   await user.click(screen.getByRole('button', { name: '保存名称' }))
   expect(await screen.findByRole('button', { name: /新的名称 ·/ })).toBeInTheDocument()
   expect(mocks.api).toHaveBeenCalledWith('/learning-accounts/b', { method: 'PATCH', body: JSON.stringify({ label: '新的名称' }) })
+})
+
+
+test('assessment-only task can start and all three scopes cannot be empty', async () => {
+  const user = userEvent.setup()
+  render(<MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}><ManagedChaoxing /></MemoryRouter>)
+  await user.click(await screen.findByRole('button', { name: /账号乙 ·/ }))
+  await user.click(screen.getByRole('button', { name: '连接并读取课程' }))
+  await user.click(await screen.findByRole('button', { name: '选择 乙的课程' }))
+  expect(screen.getByRole('checkbox', { name: '章节学习（含章节测试）' })).toBeChecked()
+  expect(screen.getByRole('checkbox', { name: '课程作业' })).not.toBeChecked()
+  expect(screen.getByRole('checkbox', { name: '课程考试' })).not.toBeChecked()
+  await user.click(screen.getByRole('checkbox', { name: '章节学习（含章节测试）' }))
+  expect(screen.getByRole('button', { name: '为所选账号启动任务' })).toBeDisabled()
+  await user.click(screen.getByRole('checkbox', { name: '课程作业' }))
+  await user.click(screen.getByRole('checkbox', { name: '课程考试' }))
+  await user.click(screen.getByRole('button', { name: '为所选账号启动任务' }))
+  await waitFor(() => expect(mocks.api).toHaveBeenCalledWith('/learning-accounts/b/tasks', expect.any(Object)))
+  const payload = JSON.parse(mocks.api.mock.calls.find(([path]) => path === '/learning-accounts/b/tasks')[1].body)
+  expect(payload).toMatchObject({ learn_chapters: false, course_homework: true, course_exams: true })
+  expect(payload.course_ids).toEqual(['course-b'])
 })

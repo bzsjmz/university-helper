@@ -110,6 +110,9 @@ function MultiPillGroup({ label, options, value, onChange, hint }) {
 }
 
 export default function ConfigSection({
+  learnChapters = true, setLearnChapters,
+  courseHomework = false, setCourseHomework,
+  courseExams = false, setCourseExams,
   speed,
   setSpeed,
   concurrency,
@@ -135,6 +138,22 @@ export default function ConfigSection({
 }) {
   return (
     <section className={`${CARD} space-y-6`}>
+      <fieldset className="space-y-3">
+        <legend className="text-sm font-medium">任务范围</legend>
+        <div className="flex flex-wrap gap-4">
+          {[
+            ['章节学习（含章节测试）', learnChapters, setLearnChapters],
+            ['课程作业', courseHomework, setCourseHomework],
+            ['课程考试', courseExams, setCourseExams],
+          ].map(([label, checked, setter]) => <label key={label} className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={checked} onChange={event => setter?.(event.target.checked)} />{label}
+          </label>)}
+        </div>
+        <p className="text-xs text-text-muted">可取消章节学习，仅处理作业或考试。作业、考试覆盖所选课程当前可处理的未提交项目，不受章节终点限制；沿用下方题库和提交模式。</p>
+        {(courseHomework || courseExams) && <p className="text-xs text-text-muted">已提交项目会跳过；无法匹配全部答案时仅保存，需人工完成。验证码、人脸、口令、监考或不支持的试卷会提示人工处理。AI 回退可能产生费用。</p>}
+        {courseExams && <p className="text-xs text-text-muted">进入考试后，平台计时可能持续；暂停或停止本地任务不会暂停平台考试计时。</p>}
+        {!learnChapters && !courseHomework && !courseExams && <p role="alert" className="text-sm text-danger">请至少勾选一种任务范围。</p>}
+      </fieldset>
       {/* Everyday playback settings */}
       <div className="grid gap-5 md:grid-cols-2">
         <div className="space-y-2">
