@@ -110,8 +110,11 @@ class TaskStore:
         task_kind: str,
         user_id: str | None = None,
         limit: int = 50,
+        *,
+        only_auto_restart: bool = False,
     ) -> list[dict[str, Any]]:
-        return [_decrypt_sensitive(item) for item in get_storage().tasks.list_tasks(task_kind, user_id, limit)]
+        kwargs = {"only_auto_restart": True} if only_auto_restart else {}
+        return [_decrypt_sensitive(item) for item in get_storage().tasks.list_tasks(task_kind, user_id, limit, **kwargs)]
 
     def append_history(
         self,

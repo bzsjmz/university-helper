@@ -132,6 +132,8 @@ async def lifespan(app: FastAPI):
     app.state.update_check_task = None
     from app.services.course.chaoxing.status_export import start_status_export
     app.state.status_export_task = start_status_export()
+    from app.services.course.chaoxing.auto_restart import auto_restart_loop
+    app.state.auto_restart_task = asyncio.create_task(auto_restart_loop())
     if _update_check_enabled():
         from app.services.update_check import UpdateChecker
 
@@ -145,6 +147,7 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         bootstrap_stop.set()
+        await _cancel_task(getattr(app.state, "auto_restart_task", None))
         await _cancel_task(getattr(app.state, "cleanup_task", None))
         await _cancel_task(getattr(app.state, "db_bootstrap_task", None))
         await _cancel_task(getattr(app.state, "update_check_task", None))

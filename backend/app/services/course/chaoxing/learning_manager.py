@@ -3,7 +3,7 @@ import os
 import threading
 import time
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
@@ -24,6 +24,7 @@ from .task_admission import (
     is_active_status,
     is_terminal_status,
     sort_task_records,
+    task_datetime,
 )
 
 logger = logging.getLogger(__name__)
@@ -236,6 +237,10 @@ class ChaoxingLearningManager:
                 "logs": [],
                 "_log_cursor": 0,
                 "_restart_config": payload.get("_restart_config"),
+                "auto_restart_attempts": int(bool(payload.get("_auto_restart_attempted"))),
+                "auto_restart_state": ("used" if payload.get("_auto_restart_attempted") else "ready")
+                    if account_id and payload.get("_restart_config") else "unavailable",
+                "auto_restart_at": None,
                 "_pause_event": pause_event,
                 "_stop_event": stop_event,
             }
@@ -425,8 +430,50 @@ class ChaoxingLearningManager:
                 task["status"] = "cancelling"
                 task["message"] = "Task cancellation requested"
             task["updated_at"] = _utc_now_iso()
+            if task.get("auto_restart_state") == "waiting":
+                task.update(auto_restart_state="cancelled", auto_restart_at=None)
         self._append_task_log(task_id, "Task cancellation requested", "warning")
         return {"status": "cancelling", "message": "Task cancellation requested"}
+
+    @staticmethod
+    def _schedule_auto_restart_locked(task: dict[str, Any]) -> None:
+        if not task.get("account_id") or not task.get("_restart_config"):
+            return
+        stop_event = task.get("_stop_event")
+        if stop_event is not None and stop_event.is_set():
+            task.update(auto_restart_state="cancelled", auto_restart_at=None)
+            return
+        if task.get("auto_restart_attempts", 0):
+            task.update(auto_restart_state="exhausted", auto_restart_at=None)
+        else:
+            task.update(auto_restart_state="waiting",
+                        auto_restart_at=(task_datetime(task) + timedelta(hours=1)).isoformat())
+
+    def claim_auto_restart(self, user_id: str, task_id: str, now: datetime) -> bool:
+        if self.get_task(user_id, task_id) is None:
+            return False
+        with self._lock:
+            task = self._tasks.get(task_id)
+            if (not task or str(task.get("user_id")) != str(user_id)
+                    or task.get("status") != "failed"
+                    or task.get("auto_restart_state") != "waiting"
+                    or task.get("auto_restart_attempts", 0)
+                    or not task.get("auto_restart_at")):
+                return False
+            try:
+                due = datetime.fromisoformat(task["auto_restart_at"])
+                if due.tzinfo is None or due > now:
+                    return False
+            except (ValueError, TypeError):
+                return False
+            # Persist consumption before starting a worker. A process crash
+            # during admission must never grant a second automatic attempt.
+            task.update(auto_restart_attempts=1, auto_restart_state="claimed", auto_restart_at=None)
+            persist_request = self._prepare_persist_locked(task)
+        if not persist_request or self._persist_task_state(*persist_request) is not True:
+            self._update_task(task_id, auto_restart_state="blocked", auto_restart_at=None)
+            return False
+        return True
 
     def restart_config(self, user_id: str, task_id: str) -> tuple[str, str | None]:
         if self.get_task(user_id, task_id) is None:
@@ -910,8 +957,11 @@ class ChaoxingLearningManager:
             # upsert the full payload pointlessly. (F31)
             if all(task.get(key) == value for key, value in changes.items()):
                 return
+            previous_status = task.get("status")
             task.update(changes)
             task["updated_at"] = _utc_now_iso()
+            if task.get("status") == "failed" and previous_status != "failed":
+                self._schedule_auto_restart_locked(task)
             persist_request = self._prepare_persist_locked(task)
         if persist_request:
             self._persist_task_state(*persist_request)
@@ -1097,6 +1147,10 @@ class ChaoxingLearningManager:
             task["message"] = RESTART_INTERRUPTED_MESSAGE
             task["current_task"] = "failed"
             task["updated_at"] = current_time
+            if str(item.get("status")) in {"stopping", "cancelling"}:
+                task.update(auto_restart_state="cancelled", auto_restart_at=None)
+            else:
+                self._schedule_auto_restart_locked(task)
             task["logs"].append(
                 {
                     "timestamp": current_time,
@@ -1106,6 +1160,12 @@ class ChaoxingLearningManager:
             )
             if len(task["logs"]) > 1000:
                 del task["logs"][:-1000]
+
+        admission_interrupted = task.get("auto_restart_state") == "claimed"
+        if admission_interrupted:
+            task.update(auto_restart_state="blocked", auto_restart_at=None)
+            task["logs"].append({"timestamp": current_time, "level": "warning",
+                                 "message": "Automatic restart admission interrupted; manual action required"})
 
         pause_event = threading.Event()
         pause_event.set()
@@ -1118,7 +1178,7 @@ class ChaoxingLearningManager:
                 return False
             self._tasks[task_id] = task
 
-        if interrupted:
+        if interrupted or admission_interrupted:
             with self._lock:
                 persist_request = self._prepare_persist_locked(task)
             if persist_request:

@@ -276,3 +276,13 @@ test('new terminal tasks restart via stored config; old tasks go to configuratio
   fireEvent.click(within(card('task-b')).getByRole('button', { name: '重新配置并启动' }))
   expect(await screen.findByRole('heading', { name: '账号管理页面' })).toBeInTheDocument()
 })
+
+test('shows the automatic restart schedule and manual action after its failure', async () => {
+  tasks = [
+    { ...tasks[0], status: 'failed', auto_restart_state: 'waiting', auto_restart_at: '2026-10-12T04:00:00Z' },
+    { ...tasks[1], status: 'failed', auto_restart_state: 'exhausted', auto_restart_attempts: 1 },
+  ]
+  renderConsole()
+  expect(await screen.findByText(/失败后等待 1 小时/)).toBeInTheDocument()
+  expect(screen.getByText('自动重启后仍失败，已停止自动重试，等待人工处理。')).toBeInTheDocument()
+})

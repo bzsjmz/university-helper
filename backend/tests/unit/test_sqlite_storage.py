@@ -80,3 +80,15 @@ def test_delete_is_owner_and_kind_scoped_and_durable(tmp_path):
     assert s.get_task('signin', 'a', 'u1')
     assert s.get_task('learning', 'b', 'u2')
     assert _store(tmp_path).get_task('learning', 'a', 'u1') is None
+
+
+def test_auto_restart_scan_filters_before_limit_and_uses_earliest_due(tmp_path):
+    s = _store(tmp_path)
+    for task_id, state, date in [('soon', 'waiting', '2026-01-01T01:00:00+00:00'),
+                                 ('later', 'waiting', '2026-01-02T01:00:00+00:00'),
+                                 ('new-history', 'exhausted', '2026-01-03T01:00:00+00:00')]:
+        assert s.upsert_task('learning', {'task_id': task_id, 'user_id': 'u1', 'status': 'failed',
+                            'updated_at': date, 'auto_restart_state': state, 'auto_restart_at': date})
+    assert s.list_tasks('learning', limit=1)[0]['task_id'] == 'new-history'
+    assert s.list_tasks('learning', limit=1, only_auto_restart=True)[0]['task_id'] == 'soon'
+    assert s.list_tasks('learning', user_id='stranger', only_auto_restart=True) == []

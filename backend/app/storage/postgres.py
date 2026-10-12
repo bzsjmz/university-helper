@@ -213,10 +213,14 @@ class _PostgresTaskStore:
         task_kind: str,
         user_id: str | None = None,
         limit: int = 50,
+        *,
+        only_auto_restart: bool = False,
     ) -> list[dict[str, Any]]:
         if not task_kind:
             return []
 
+        waiting_filter = "AND status = 'failed' AND payload->>'auto_restart_state' = 'waiting'" if only_auto_restart else ""
+        sort_order = "payload->>'auto_restart_at' ASC, task_id ASC" if only_auto_restart else "updated_at DESC NULLS LAST, task_id DESC"
         safe_limit = max(1, min(int(limit or 50), 2000))
         try:
             if self.ensure_tables() is not True:
@@ -225,22 +229,24 @@ class _PostgresTaskStore:
                 cur = conn.cursor()
                 if user_id:
                     cur.execute(
-                        """
+                        f"""
                         SELECT task_id, user_id, task_kind, status, message, started_at, updated_at, payload
                         FROM course_task_store
                         WHERE task_kind = %s AND user_id = %s
-                        ORDER BY updated_at DESC NULLS LAST, task_id DESC
+                        {waiting_filter}
+                        ORDER BY {sort_order}
                         LIMIT %s
                         """,
                         (task_kind, str(user_id), safe_limit),
                     )
                 else:
                     cur.execute(
-                        """
+                        f"""
                         SELECT task_id, user_id, task_kind, status, message, started_at, updated_at, payload
                         FROM course_task_store
                         WHERE task_kind = %s
-                        ORDER BY updated_at DESC NULLS LAST, task_id DESC
+                        {waiting_filter}
+                        ORDER BY {sort_order}
                         LIMIT %s
                         """,
                         (task_kind, safe_limit),

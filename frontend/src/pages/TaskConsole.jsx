@@ -225,6 +225,9 @@ export default function TaskConsole() {
           const busy = Boolean(pending[task.task_id]) || Boolean(errors.tasks)
           return <Card as="article" key={task.task_id} aria-label={`任务 ${name} ${task.task_id}`} className={selected?.task_id === task.task_id ? 'ring-1 ring-primary' : ''}>
             <div className="flex justify-between gap-3"><div className="min-w-0"><h3 className="truncate font-bold">{name}</h3><p className="text-xs text-text-muted">{task.account_label || '未记录登录账号'}</p></div><StatusBadge status={task.status} /></div>
+            {task.auto_restart_state === 'waiting' && <p className="mt-3 text-sm text-text-muted">失败后等待 1 小时，预计 {time(task.auto_restart_at)} 自动重启一次。</p>}
+            {task.auto_restart_state === 'exhausted' && <p className="mt-3 text-sm text-text-muted">自动重启后仍失败，已停止自动重试，等待人工处理。</p>}
+            {['blocked', 'claimed'].includes(task.auto_restart_state) && <p className="mt-3 text-sm text-text-muted">{task.auto_restart_state === 'claimed' ? '正在尝试自动重启。' : '自动重启未完成，请人工处理。'}</p>}
             <p className="mt-4 truncate font-semibold">{normalizeCourseText(progress.current_course) || '等待课程信息'}</p>
             <p className="mt-1 truncate text-sm text-text-muted">{normalizeCourseText(progress.current_chapter) || task.current_task || '准备中'}</p>
             <div className="mt-4 space-y-3"><Progress label="课程进度" done={progress.completed} total={progress.total} /><Progress label="章节进度" done={progress.completed_chapters} total={progress.total_chapters} /></div>

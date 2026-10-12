@@ -254,11 +254,13 @@ class _SqliteTaskStore:
             return None
         return self._row_to_task(row)
 
-    def list_tasks(self, task_kind: str, user_id: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+    def list_tasks(self, task_kind: str, user_id: str | None = None, limit: int = 50, *, only_auto_restart: bool = False) -> list[dict[str, Any]]:
         if not self._usable:
             return []
         if not task_kind:
             return []
+        waiting_filter = "AND status = 'failed' AND json_extract(payload, '$.auto_restart_state') = 'waiting'" if only_auto_restart else ""
+        sort_order = "json_extract(payload, '$.auto_restart_at') ASC, task_id ASC" if only_auto_restart else "(updated_at IS NULL), updated_at DESC, task_id DESC"
         safe_limit = max(1, min(int(limit or 50), 2000))
         try:
             if self.ensure_tables() is not True:
@@ -270,22 +272,24 @@ class _SqliteTaskStore:
                 try:
                     if user_id:
                         cur = self._conn.execute(
-                            """
+                            f"""
                             SELECT task_id, user_id, task_kind, status, message, started_at, updated_at, payload
                             FROM course_task_store
                             WHERE task_kind = ? AND user_id = ?
-                            ORDER BY (updated_at IS NULL), updated_at DESC, task_id DESC
+                            {waiting_filter}
+                            ORDER BY {sort_order}
                             LIMIT ?
                             """,
                             (task_kind, str(user_id), safe_limit),
                         )
                     else:
                         cur = self._conn.execute(
-                            """
+                            f"""
                             SELECT task_id, user_id, task_kind, status, message, started_at, updated_at, payload
                             FROM course_task_store
                             WHERE task_kind = ?
-                            ORDER BY (updated_at IS NULL), updated_at DESC, task_id DESC
+                            {waiting_filter}
+                            ORDER BY {sort_order}
                             LIMIT ?
                             """,
                             (task_kind, safe_limit),

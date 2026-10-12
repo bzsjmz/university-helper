@@ -108,7 +108,7 @@ async def chapters(account_id: str, course_id: str, owner: str = Depends(get_cur
     return await asyncio.to_thread(fetch)
 
 
-def _start_saved_task(account_id, request, owner):
+def _start_saved_task(account_id, request, owner, *, automatic=False):
     """Caller holds the account lock through admission and replacement."""
     row, username, password = managed_accounts.credentials(owner, account_id)
     payload = request.model_dump()
@@ -117,6 +117,8 @@ def _start_saved_task(account_id, request, owner):
     if not ciphertext.startswith("fernet:"):
         raise HTTPException(503, "Credential encryption is required")
     payload["_restart_config"] = ciphertext
+    if automatic:
+        payload["_auto_restart_attempted"] = True
     payload.update(platform='chaoxing', username=username, password=password,
                    account_id=account_id, account_key=row['account_key'],
                    account_label=row['account_label'], account_name=row['label'])
@@ -139,38 +141,62 @@ async def start_task(account_id: str, request: AccountTask, owner: str = Depends
     return {'task_id': task_id, 'status': 'started', 'message': 'Task started'}
 
 
+def restart_saved_task(task_id: str, owner: str, *, automatic=False, now=None, should_stop=None):
+    manager = _get_learning_manager()
+    account_id, _ = manager.restart_config(str(owner), task_id)
+    if not account_id:
+        raise HTTPException(409, 'Old task has no saved configuration; select courses and settings again')
+    with managed_accounts.lock(owner, account_id):
+        # Recheck after locking: a concurrent restart may have already
+        # replaced this record, even if its new worker finished quickly.
+        current_account, ciphertext = manager.restart_config(str(owner), task_id)
+        if current_account != account_id or not ciphertext:
+            raise HTTPException(409, 'Old task has no saved configuration; select courses and settings again')
+        try:
+            request = AccountTask.model_validate(json.loads(decrypt_str(ciphertext)))
+        except Exception:
+            raise HTTPException(409, 'Saved configuration unavailable; select courses and settings again') from None
+        if not request.course_ids or len(request.course_ids) > 100:
+            raise HTTPException(409, 'Saved course selection unavailable; select courses again')
+        if automatic:
+            if callable(should_stop) and should_stop():
+                return None
+            from datetime import UTC, datetime
+            from app.services.course.chaoxing.task_admission import task_datetime
+            current = manager.get_task(str(owner), task_id)
+            # A manual new start supersedes an older pending restart even if
+            # that newer task has already ended. The account lock serializes
+            # this check with manual starts/restarts and account deletion.
+            newer = any(t.get("account_id") == account_id and t["task_id"] != task_id
+                        and task_datetime({"updated_at": t.get("started_at")})
+                        >= task_datetime({"updated_at": current.get("started_at")})
+                        for t in manager.list_tasks(str(owner)))
+            if newer:
+                manager._update_task(task_id, auto_restart_state="superseded", auto_restart_at=None)
+                return None
+            if not manager.claim_auto_restart(str(owner), task_id, now or datetime.now(UTC)):
+                return None
+            new_id = _start_saved_task(account_id, request, owner, automatic=True)
+        else:
+            new_id = _start_saved_task(account_id, request, owner)
+        # Never remove the only restartable record until persistence and
+        # thread admission succeeded. Cleanup failure must not turn an
+        # already-started task into a retryable HTTP failure.
+        removed = True
+        try:
+            manager.delete_task(str(owner), task_id)
+        except Exception:
+            removed = False
+            logger.warning('Restart admitted but previous record cleanup failed')
+        return {'task_id': new_id, 'status': 'started',
+                'message': 'Task restarted', 'replaced_task_id': task_id,
+                'previous_task_removed': removed}
+
+
 @router.post('/tasks/{task_id}/restart')
 async def restart_task(task_id: str, owner: str = Depends(get_current_user_id)):
     def replace():
-        manager = _get_learning_manager()
-        account_id, _ = manager.restart_config(str(owner), task_id)
-        if not account_id:
-            raise HTTPException(409, 'Old task has no saved configuration; select courses and settings again')
-        with managed_accounts.lock(owner, account_id):
-            # Recheck after locking: a concurrent restart may have already
-            # replaced this record, even if its new worker finished quickly.
-            current_account, ciphertext = manager.restart_config(str(owner), task_id)
-            if current_account != account_id or not ciphertext:
-                raise HTTPException(409, 'Old task has no saved configuration; select courses and settings again')
-            try:
-                request = AccountTask.model_validate(json.loads(decrypt_str(ciphertext)))
-            except Exception:
-                raise HTTPException(409, 'Saved configuration unavailable; select courses and settings again') from None
-            if not request.course_ids or len(request.course_ids) > 100:
-                raise HTTPException(409, 'Saved course selection unavailable; select courses again')
-            new_id = _start_saved_task(account_id, request, owner)
-            # Never remove the only restartable record until persistence and
-            # thread admission succeeded. Cleanup failure must not turn an
-            # already-started task into a retryable HTTP failure.
-            removed = True
-            try:
-                manager.delete_task(str(owner), task_id)
-            except Exception:
-                removed = False
-                logger.warning('Restart admitted but previous record cleanup failed')
-            return {'task_id': new_id, 'status': 'started',
-                    'message': 'Task restarted', 'replaced_task_id': task_id,
-                    'previous_task_removed': removed}
+        return restart_saved_task(task_id, owner)
     try:
         return await asyncio.to_thread(replace)
     except KeyError:

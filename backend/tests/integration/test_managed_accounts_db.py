@@ -70,3 +70,18 @@ def test_task_record_delete_is_scoped_and_survives_recreation(store):
     assert tasks.get_task('chaoxing_learning', 'isolated-delete', 'owner-a')
     assert tasks.delete_task('chaoxing_learning', 'isolated-delete', 'owner-a')
     assert PostgresStorage().tasks.get_task('chaoxing_learning', 'isolated-delete', 'owner-a') is None
+
+
+def test_auto_restart_candidates_are_filtered_before_limit(store):
+    from app.storage.postgres import PostgresStorage
+    tasks = PostgresStorage().tasks
+    for task_id, state, date in [('retry-soon', 'waiting', '2026-01-01T01:00:00+00:00'),
+                                 ('retry-later', 'waiting', '2026-01-02T01:00:00+00:00'),
+                                 ('history-newer', 'exhausted', '2026-01-03T01:00:00+00:00')]:
+        assert tasks.upsert_task('isolated-auto-restart', {
+            'task_id': task_id, 'user_id': 'owner-a', 'status': 'failed', 'updated_at': date,
+            'auto_restart_state': state, 'auto_restart_at': date,
+        })
+    assert tasks.list_tasks('isolated-auto-restart', limit=1)[0]['task_id'] == 'history-newer'
+    assert tasks.list_tasks('isolated-auto-restart', limit=1, only_auto_restart=True)[0]['task_id'] == 'retry-soon'
+    assert tasks.list_tasks('isolated-auto-restart', user_id='owner-b', only_auto_restart=True) == []
