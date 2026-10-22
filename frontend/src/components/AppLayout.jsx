@@ -9,6 +9,7 @@ const NAV = [
   { to: '/dashboard', label: '工作台', shortLabel: '总览', icon: LayoutGrid },
   { to: '/chaoxing-signin', label: '学习通签到', shortLabel: '签到', icon: CheckCircle },
   { to: '/chaoxing-fanya', label: '学习通泛雅', shortLabel: '泛雅', icon: BookOpen },
+  { to: '/english-learning', label: '英语平台试用', shortLabel: '英语', icon: BookOpen },
   { to: '/zhihuishu-panel', label: '智慧树', shortLabel: '智慧树', icon: GraduationCap },
 ]
 
@@ -86,7 +87,7 @@ export default function AppLayout() {
         </div>
 
         <nav className="border-t border-border-subtle px-2 py-1.5 md:hidden" aria-label="服务切换">
-          <div className="mx-auto grid max-w-lg grid-cols-4 gap-1">
+          <div className="mx-auto grid max-w-lg grid-cols-5 gap-1">
             {NAV.map(({ to, label, shortLabel, icon: Icon }) => {
               const active = location.pathname === to
               return (

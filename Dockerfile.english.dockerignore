@@ -1,0 +1,6 @@
+**
+!backend
+backend/**
+!backend/app
+!backend/app/**
+!backend/requirements-english.txt

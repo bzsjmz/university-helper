@@ -1,0 +1,13 @@
+# Optional backend image with legacy U-campus browser support.
+# Build/review separately; do not replace running services automatically.
+FROM ghcr.io/sweetcornna/university-helper-app:1.5.0
+USER root
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/university-helper-browsers
+COPY backend/requirements-english.txt /tmp/requirements-english.txt
+RUN PIP_NO_INDEX=0 python -m pip install --no-cache-dir -r /tmp/requirements-english.txt \
+    && python -m playwright install --with-deps chromium \
+    && chmod -R a+rX /opt/university-helper-browsers \
+    && rm /tmp/requirements-english.txt \
+    && rm -rf /var/lib/apt/lists/*
+COPY --chown=app:app backend/app /srv/backend/app
+USER app

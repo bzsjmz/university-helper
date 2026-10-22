@@ -1,0 +1,3 @@
+# Optional browser runtime for legacy U-campus. Install only in a dedicated
+# backend image/environment, then install Chromium + its OS dependencies there.
+playwright==1.63.0
