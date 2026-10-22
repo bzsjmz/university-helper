@@ -1,78 +1,101 @@
 # 英语平台试用（WE Learn / 老版 U校园）
 
-入口：导航「英语平台试用」，路径 `/english-learning`。所有接口位于
-`/api/v1/english-learning`，沿用当前用户认证，账号会话和任务按管理用户隔离。
-本功能为初期接入，尚未通过真实账号验证，不能保证平台接纳时长。
+入口：导航「英语平台试用」，路径 `/english-learning`。接口位于
+`/api/v1/english-learning`，沿用当前管理用户认证并隔离会话/任务。
+当前代码只通过离线合成页面和模拟请求验证；尚未通过真实课程验证，也未上线。
 
-## 当前支持范围
+## 自动答题与作业
 
-- WE Learn：导入官网请求 Cookie、读取课程及已开放小节、选择单个小节，
-  按真实等待时间发心跳并保存累计时长；原进度、分数、完成状态保持平台返回值。
-  首次使用小节需先在官网打开以初始化学习数据。
-- 老版 U校园：导入 Playwright storage state 和课程目录网址，读取必修的
-  预览/文本入口，选择一项后在隔离的无头浏览器上下文中打开并停留。
-  检测到输入框时提示人工处理。仅允许平台 HTTPS 资源；依赖其他域名的课程可能无法打开。
-- 每次启动前显示课程、内容和时长。默认 60 秒，试用范围 30–1800 秒。
-- 停止终止工作进程组并等待其退出；平台已接收的心跳/访问记录不会撤回。
-- 任务结束只说明限时会话结束。不会把本地结束解释为平台课程通过。
+1. 导入登录会话，读取课程并明确选择一项内容。
+2. 选择「自动答题／作业（当前页）」。默认总预算 300 秒，可设 30–1800 秒。
+3. 默认使用「缓存未命中时使用服务器 AI」；可取消以仅查缓存。启用 AI 后的
+   真实任务可能收费，测试不会调用真实付费接口。
+4. 默认尝试保存。只有单独勾选自动提交，且全页题目都受支持、答案完整、
+   填写后复核一致，才点击所选练习/作业页面的原生提交按钮。
+5. 仅有新的平台成功提示时记录已保存/已提交；点击后结果不明会提示官网核对，
+   不自动重试，不自动重做。部分平台自动保存没有可识别回执时也不会冒称保存成功。
 
-当前不支持自动答题、作业/考试提交、密码登录、验证码代填、自动恢复/重启，
-也不写入学习通账号表、重启配置或 QQ 状态快照。没有移植参考项目中直接写入
-100% 分数、伪造完成状态、随机答案、JWT 自签或失败强行提交的代码。
+支持标准 radio 单选、checkbox 多选、文本填空、单个 select 的下拉选词及
+textarea 简答/翻译。题目按 DOM 顺序处理，选项顺序严格保留；相同选项文本、
+一个容器中混有多个选择组、特殊编辑器、多个混合控件无法明确对应时转人工。
+图片题、缺少文本的听力、录音/口语题、验证码、人脸、监考、未开放或过期内容
+不自动处理。当前只处理所选内容的当前页，不自动遍历下一页、考试或重考。
+独立的班级作业列表/特殊作业页面没有伪造适配；只有符合支持表单的普通课程
+练习/作业能够处理，其他页面须提供脱敏结构样例后再适配。
+
+WE Learn 在选中小节后通过原生 StudyCourse 页面读取和填写表单，不构造 100% 分数、
+正确率或 completed 数据。老版 U校园目录增加必修 `.icon-lianxi` 练习/作业入口，
+与已支持的阅读/预览入口一起展示，启动时重新核对目录与名称，防止错选。
+不移植参考项目自签 JWT、随机答案、盲目点击最后按钮、空答案强行提交或自动重做。
+
+任务显示题目数、有答案数、已填数、缺失数、不支持控件数、保存/提交回执数和未确认数。
+AI作答数是使用 AI 结果的题目数，不是 HTTP 尝试数或计费请求数。实际 API 用量继续
+由既有 api_usage 遥测记录，缺失 usage 不推算为零。
+
+## 与之前答题逻辑的复用
+
+- 使用现有 CacheDAO 的进程共享缓存、同题请求锁和当前等待者失败复用。
+- 英语缓存使用独立命名空间，包含平台、课程、题干、上下文、题型、空数、完整
+  有序选项和服务器模型/endpoint；不会用旧选项字母绕过换序校验。
+- 使用现有 AI provider 的服务器配置、DeepSeek 双 Key、有界重试、HTTP 200
+  空/坏响应不再生成、token 限制、超时和 usage 统计。
+- 每个新任务初始化自己的 provider，读取当前服务器 Key；英语任务共享请求信号量，
+  默认最多 3 个在途请求。没有恢复学习通账号或章节并发上限。
+- 使用现有 question/job 控制作用域；单题默认 120 秒，整体另受所选答题预算限制。
+  同步 HTTP 无法精确强杀，取消会阻止后续取题和提交；在途网络最多等其有界 timeout。
+- AI 在后端父进程执行，浏览器子进程仅通过私有管道传题/接收答案，不接收服务器 Key、
+  数据库或 JWT 环境变量。未走会输出原始题目/答案日志的 Tiku.query 包装层。
+- 缓存只接受通过形状和选项校验的答案；这不是正确率保证，AI 可能答错。
+
+## 原限时学习模式
+
+WE Learn 仍可读取课程/开放小节、按实际等待心跳累计时长；原进度、分数和完成状态
+保留平台返回值。首次使用小节须先在官网打开以初始化学习数据。
+老版 U校园限时学习打开所选阅读页，遇到交互题目提示人工处理。
+本地会话结束不等于平台课程通过，实际时长/进度/成绩须在官网核对。
 
 ## 登录信息与隔离
 
-WE Learn 登录官网后在开发者工具 Network 中复制对 `welearn.sflep.com` 请求的
-Cookie。不要粘贴其他网站凭据。
+WE Learn 官网登录后，从开发者工具 Network 复制发往 `welearn.sflep.com` 请求的
+Cookie；勿粘贴其他站点信息。
 
-老版 U校园先在本人本地浏览器完成登录/验证码，使用本人的 Playwright 浏览器
-上下文 `context.storage_state()` 导出登录状态。只保留 `unipus.cn` cookies，
-以及 `https://u.unipus.cn`、`https://ucontent.unipus.cn` 的 origins/localStorage。
-需要课程目录网址：`https://u.unipus.cn/user/student/mycourse/courseCatalog?...`。
-本项目不会读取机器上已有浏览器 profile。
+老版 U校园先在本人本地浏览器完成登录/验证码，使用本人的 Playwright 上下文
+`context.storage_state()` 导出状态。只保留 `unipus.cn` cookies 及
+`https://u.unipus.cn`、`https://ucontent.unipus.cn` 的 origins/localStorage。
+课程目录地址必须是 `https://u.unipus.cn/user/student/mycourse/courseCatalog?...`。
+不会读取本机已有浏览器 profile。
 
-登录信息不进入 localStorage、日志、数据库或任务返回值。服务端复用现有 Fernet
-辅助工具在内存中保存，连接验证进程短暂使用明文，关掉工作进程即释放该副本。
-会话一小时过期（执行中会话延至任务结束清理），可手动断开；终态记录两小时清理。
-服务重启会丢失这些试用会话/记录，已有学习通任务机制不受此模块修改。
-相同试用会话只允许一项操作；导入同一真实账号的多个会话没有跨会话去重，
-请勿同时运行同一账号。长期独立低权限宿主管理用户尚未落实。
+登录信息不写 localStorage、日志、数据库或任务返回值。服务端使用既有 Fernet
+辅助工具在短期内存会话中保存，子进程通过 stdin 短暂使用明文，退出即释放副本。
+会话一小时过期（执行中延至结束清理），可手动断开；终态任务保留两小时。
+任务/登录状态不跨重启恢复，不自动重新启动，不加入学习通账号表或 QQ 快照。
+同一试用会话只允许一项操作；重复导入同一真实账号没有跨会话去重，请勿同时运行。
+独立低权限宿主管理用户尚未落实。
 
-## 可选浏览器运行环境与上线
+## 浏览器运行环境与上线
 
-WE Learn 使用现有 requests 依赖。老版 U校园需要在项目独立后端运行环境内安装
-`backend/requirements-english.txt` 以及 Playwright Chromium 和相应系统库。
-现有本机后端基础镜像不含这些依赖。不得在宿主或 Agent 环境全局安装，不得为
-解决 Chromium 启动失败关闭 sandbox。浏览器使用 `chromium_sandbox=True`，
-无摄像头/麦克风授权、不使用共享 profile、不挂 Docker socket。
+两平台自动答题及老版 U校园目录/阅读均需要 Playwright 和 Chromium。WE Learn 的
+原课程读取/时长模式只需要 requests。当前运行基础镜像尚不含浏览器。
 
-已提供可选 `Dockerfile.english`（尚未构建或验证实际浏览器）。该构建文件固定 Playwright 1.63.0，
-将浏览器与系统依赖安装在镜像内，以原 app 用户运行，保留 sandbox。
-镜像依赖与 sandbox 注意事项参考 <https://playwright.dev/python/docs/docker>。
-发布前需准备独立浏览器镜像/受限运行环境，评估现有 app 的 200 pids 和内存预算，
-验证宿主/容器支持 Chromium sandbox；未经资源与上线授权不能提高业务限额或重启 app。
-没有浏览器环境时会返回明确错误，不能声称 U校园已上线可用。
-该初版代码不自动部署，也不会使用真实 Cookie、真实平台或付费 API 自测。
+可选 `Dockerfile.english` 固定 Playwright 1.63.0，在镜像内安装浏览器和系统依赖，
+以原 app 用户运行，保留 `chromium_sandbox=True`。该镜像尚未构建/验证。
+不得为启动浏览器关闭 sandbox、扩大业务权限或自行提高资源限额。
+构建/namespace 与 sandbox 要求参考 <https://playwright.dev/python/docs/docker>。
 
-## 参考来源
-
-- <https://github.com/xuebi0218/welearn-gui>，实际 LICENSE 为 MulanPSL-2.0。
-  参考课程列表、单元、小节及心跳/保存协议，重新实现固定域名、有界响应、
-  禁止重定向、真实等待和错误脱敏。许可证保留于
-  `third_party/english-learning/welearn-gui.LICENSE`。
-- <https://github.com/hyhang915/AutoUnipus-plus>，BSD-3-Clause，
-  Copyright (c) 2024, PengChenxu。参考目录地址、必修图标及阅读/预览入口定位方式；
-  未引入其整个 runner 或答题链。许可证保留于
-  `third_party/english-learning/AutoUnipus-plus.LICENSE`。
-
-此处借用内容按各自许可证提供，不更改仓库其他内容的许可证。
-
-参考源码核对版本（2026-10-22）：
-`welearn-gui@015c1ac58669c5ca2f20d2015d6e184266ce7f08`；
-`AutoUnipus-plus@724f50c11ca9dff16cfc874f492c5abbc4ab6d83`。
-
-构建示例（不代表部署授权）：在源码目录中使用
+构建示例（不代表部署授权）：源码目录执行
 `docker build -f Dockerfile.english -t university-helper-app-english:trial .`。
-构建上下文由 `Dockerfile.english.dockerignore` 限制为后端源码和浏览器依赖清单，
-不会包含本机 runtime、secrets、data 或 browser profile。构建后仍需在隔离环境
-验证 Chromium sandbox、资源余量和两平台真实课程格式，不能直接宣称可上线。
+专用 dockerignore 只开放后端源码和浏览器依赖清单，排除 runtime/secrets/data/profile。
+发布前须在隔离环境验证 sandbox、当前 app 200 pids/1GiB 预算与真实课程结构，
+核对活动任务并另获上线授权；代码提交/模拟测试通过不等于功能已上线可用。
+浏览器只允许平台域名的 HTTPS 资源，不授权摄像头/麦克风、不共享 profile 或 Docker
+socket；依赖其他 CDN/第三方域名的课程可能无法打开，须明确核对后另做受限适配。
+
+## 来源与许可证
+
+- <https://github.com/xuebi0218/welearn-gui>，实际 LICENSE=MulanPSL-2.0，版本
+  `015c1ac58669c5ca2f20d2015d6e184266ce7f08`：参考课程、小节及心跳协议。
+- <https://github.com/hyhang915/AutoUnipus-plus>，BSD-3-Clause，
+  Copyright (c) 2024, PengChenxu，版本 `724f50c11ca9dff16cfc874f492c5abbc4ab6d83`：
+  参考目录地址、必修/练习图标及旧版提交控件定位；未引入整个 runner/答题链。
+
+许可证原文保留于 `third_party/english-learning/`，借用内容各自按其许可证提供。

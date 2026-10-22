@@ -7,6 +7,7 @@ process group and waits for its exit before publishing a terminal status.
 import json
 import os
 import signal
+import selectors
 import subprocess
 import sys
 import threading
@@ -38,8 +39,10 @@ class EnglishManager:
 
     @staticmethod
     def public(task):
-        return {key: task[key] for key in ('id', 'platform', 'course_name', 'item_name',
-                'seconds', 'status', 'message', 'started_at')}
+        result = {key: task[key] for key in ('id', 'platform', 'course_name', 'item_name',
+                'seconds', 'status', 'message', 'started_at', 'mode', 'submit', 'allow_ai')}
+        result['counts'] = dict(task.get('counts', {}))
+        return result
 
     @staticmethod
     def kill(process):
@@ -80,6 +83,8 @@ class EnglishManager:
                 if cancelled:
                     self.kill(process)
                     return {}
+            if request['action'] == 'answer':
+                return self._answer_channel(process, request, task)
             raw, _ = process.communicate(json.dumps(request).encode(),
                                         timeout=request.get('seconds', 0) + 120)
             if len(raw) > 2_000_000 or process.returncode:
@@ -90,6 +95,52 @@ class EnglishManager:
             return result
         except (subprocess.TimeoutExpired, ValueError):
             raise PlatformError('平台操作超时或返回格式异常') from None
+
+    def _answer_channel(self, process, request, task):
+        from .answering import EnglishSolver
+        deadline = time.monotonic() + request['seconds']
+        solver = EnglishSolver(request['platform'], request['course'], request.get('allow_ai', False),
+            lambda: (task is not None and task['cancel'].is_set()) or time.monotonic() >= deadline)
+        selector = selectors.DefaultSelector()
+        try:
+            selector.register(process.stdout, selectors.EVENT_READ)
+            process.stdin.write(json.dumps(request).encode() + b'\n')
+            process.stdin.flush()
+            buffer = b''
+            while time.monotonic() < deadline:
+                if task is not None and task['cancel'].is_set():
+                    raise PlatformError('任务已停止')
+                if not selector.select(timeout=min(1, max(0, deadline - time.monotonic()))):
+                    continue
+                chunk = os.read(process.stdout.fileno(), 65536)
+                if not chunk:
+                    raise PlatformError('答题工作进程已退出，平台保存/提交状态请在官网核对')
+                buffer += chunk
+                if len(buffer) > 2_000_000:
+                    raise PlatformError('答题页面数据过大，已停止')
+                while b'\n' in buffer:
+                    line, buffer = buffer.split(b'\n', 1)
+                    event = json.loads(line)
+                    if event.get('event') == 'question':
+                        result = solver.solve(event.get('question'))
+                        if task is not None:
+                            with self.lock:
+                                task['counts']['questions'] = task['counts'].get('questions', 0) + 1
+                                field = 'answered' if result.get('answer') is not None else 'missing'
+                                task['counts'][field] = task['counts'].get(field, 0) + 1
+                        process.stdin.write(json.dumps(result).encode() + b'\n')
+                        process.stdin.flush()
+                    elif event.get('ok'):
+                        process.wait(timeout=10)
+                        return event
+                    else:
+                        raise PlatformError(event.get('message', '答题工作进程失败'))
+            raise PlatformError('答题总预算耗尽，进程已停止；请在官网核对保存/提交状态')
+        except (BrokenPipeError, ValueError, subprocess.TimeoutExpired):
+            raise PlatformError('答题通道中断，请在官网核对保存/提交状态') from None
+        finally:
+            selector.close()
+            solver.close()
 
     def connect(self, owner, platform, credential, course=''):
         self.cleanup()
@@ -135,7 +186,7 @@ class EnglishManager:
             with self.lock:
                 session['busy'] = False
 
-    def start(self, owner, sid, course, item, seconds):
+    def start(self, owner, sid, course, item, seconds, mode='study', submit=False, allow_ai=False):
         with self.lock:
             session = self.session(owner, sid)
             if session['busy']:
@@ -147,19 +198,22 @@ class EnglishManager:
                     'course_name': next(c['name'] for c in session['courses'] if c['id'] == course),
                     'item_name': selected['name'], 'seconds': seconds, 'status': 'running',
                     'message': '限时学习会话执行中', 'started_at': time.time(),
-                    'updated': time.monotonic(), 'cancel': threading.Event()}
+                    'updated': time.monotonic(), 'cancel': threading.Event(),
+                    'mode': mode, 'submit': submit, 'allow_ai': allow_ai, 'counts': {}}
             session['busy'] = True
             self.tasks[task['id']] = task
             def run():
                 try:
-                    result = self.execute({'platform': session['platform'], 'action': 'study',
+                    result = self.execute({'platform': session['platform'], 'action': 'answer' if mode == 'answer' else 'study',
+                        'submit': submit, 'allow_ai': allow_ai,
                         'credential': decrypt_str(session['credential']), 'course': course,
                         'item': item, 'seconds': seconds, 'expected_name': selected['name']}, task)
                     with self.lock:
-                        task.update(status=result.get('status', 'failed'), message=result.get('message', '操作未完成'))
+                        task.update(status=result.get('status', 'failed'), message=result.get('message', '操作未完成'),
+                                    counts=result.get('counts', {}))
                 except Exception as exc:
                     with self.lock:
-                        task.update(status='failed', message=str(exc) if isinstance(exc, PlatformError) else '无法启动平台任务')
+                        task.update(status='failed', message=str(exc) if isinstance(exc, PlatformError) else '平台任务执行失败，请在官网核对保存/提交状态')
                 finally:
                     with self.lock:
                         if task['cancel'].is_set():

@@ -13,7 +13,10 @@ export default function EnglishLearning() {
   const [course, setCourse] = useState('')
   const [items, setItems] = useState([])
   const [item, setItem] = useState('')
-  const [seconds, setSeconds] = useState(60)
+  const [seconds, setSeconds] = useState(300)
+  const [mode, setMode] = useState('answer')
+  const [submit, setSubmit] = useState(false)
+  const [allowAi, setAllowAi] = useState(true)
   const [tasks, setTasks] = useState([])
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
@@ -68,12 +71,12 @@ export default function EnglishLearning() {
     })
     if (!alive.current || version !== revision.current) return
     setItems(result.items)
-    if (!result.items.length) setMessage('未发现可试用内容。U校园当前仅识别已开放的必修预览／阅读入口。')
+    if (!result.items.length) setMessage('未发现可试用内容。U校园当前识别已开放的必修阅读、练习／作业入口。')
   })
 
   const start = () => perform(async () => {
     const task = await api(`/english-learning/sessions/${session.session_id}/tasks`, {
-      method: 'POST', body: JSON.stringify({ course, item, seconds: Number(seconds) }),
+      method: 'POST', body: JSON.stringify({ course, item, seconds: Number(seconds), mode, submit: mode === 'answer' && submit, allow_ai: mode === 'answer' && allowAi }),
     })
     if (alive.current) setTasks((old) => [...old, task])
   })
@@ -85,8 +88,8 @@ export default function EnglishLearning() {
         <p className="mt-2 text-text-muted">WE Learn · 老版 U校园</p>
       </div>
       <div className="rounded-xl border border-border bg-surface p-4 text-sm leading-7">
-        <p>当前支持限时学习会话。WE Learn 累计时长并保留原分数和完成状态；U校园打开所选阅读页面，遇到交互题目提示人工处理。</p>
-        <p>本页暂不自动答题、提交作业或考试。会话结束表示本地流程结束，平台时长、进度和成绩请在官网核对。</p>
+        <p>支持所选内容当前页的自动答题/作业保存，也可切换为限时学习。自动答题复用本地缓存和服务器 AI；遇到缺失答案或不支持的题型会停止提交。</p>
+        <p>自动提交须单独勾选；平台回执未确认时不会重试提交。验证码、监考、口语录音和无文本的听力需要人工处理，暂不自动考试或跨页遍历。</p>
         <p>登录信息只在服务端短期会话中使用，不写入浏览器存储。请只导入目标平台的登录信息。</p>
       </div>
       {!session ? (
@@ -123,10 +126,21 @@ export default function EnglishLearning() {
               {items.map((i) => <option key={i.id} value={i.id}>{i.name} {i.progress}</option>)}
             </select>
           </label>
-          <label className="block">会话时长（秒，30–1800）
+          <label className="block">执行模式
+            <select className={field} value={mode} disabled={busy} onChange={(e) => setMode(e.target.value)}>
+              <option value="answer">自动答题／作业（当前页）</option>
+              <option value="study">限时学习</option>
+            </select>
+          </label>
+          {mode === 'answer' && <div className="space-y-2 text-sm">
+            <p>两平台自动答题均需后端浏览器环境。默认尝试保存；填写不等于已保存，最终状态以平台回执为准。</p>
+            <label className="flex gap-2"><input type="checkbox" checked={allowAi} disabled={busy} onChange={(e) => setAllowAi(e.target.checked)} />缓存未命中时使用服务器 AI（可能产生费用）</label>
+            <label className="flex gap-2"><input type="checkbox" checked={submit} disabled={busy} onChange={(e) => setSubmit(e.target.checked)} />整页答案完整并复核通过后，自动提交所选练习／作业</label>
+          </div>}
+          <label className="block">{mode === 'answer' ? '答题总预算' : '会话时长'}（秒，30–1800）
             <input className={field} type="number" min="30" max="1800" step="1" value={seconds} onChange={(e) => setSeconds(e.target.value)} disabled={busy} />
           </label>
-          <p className="text-sm">将对上述所选课程的一项内容执行 {seconds || '—'} 秒会话，请核对后启动。</p>
+          <p className="text-sm">将对上述所选课程的一项内容执行 {seconds || '—'} 秒{mode === 'answer' ? `答题（${submit ? '允许完整提交' : '仅尝试保存'}）` : '学习会话'}，请核对后启动。</p>
           <div className="flex gap-3">
             <button className={button} disabled={busy || !course || !item || !Number.isInteger(Number(seconds)) || seconds < 30 || seconds > 1800} onClick={start}>确认并启动</button>
             <button className={button} disabled={busy} onClick={() => perform(async () => {
@@ -144,8 +158,9 @@ export default function EnglishLearning() {
         {tasks.map((task) => (
           <article key={task.id} className="rounded-xl border border-border p-4">
             <p>{task.platform === 'welearn' ? 'WE Learn' : '老版 U校园'} · {task.course_name}</p>
-            <p>{task.item_name} · {task.seconds} 秒 · {statuses[task.status] || task.status}</p>
+            <p>{task.item_name} · {task.mode === 'answer' ? '自动答题' : '限时学习'} · {task.seconds} 秒 · {statuses[task.status] || task.status}</p>
             <p className="mt-2 text-sm text-text-muted">{task.message}</p>
+            {task.mode === 'answer' && <p className="text-sm">题目 {task.counts?.questions || 0} · 有答案 {task.counts?.answered || 0} · 缓存 {task.counts?.cache_hits || 0} · AI作答 {task.counts?.ai_answers || 0} · 已填 {task.counts?.filled || 0} · 缺失 {task.counts?.missing || 0} · 不支持 {task.counts?.unsupported || 0} · 已保存 {task.counts?.saved || 0} · 已提交 {task.counts?.submitted || 0} · 回执未确认 {task.counts?.submission_unknown || 0}</p>}
             {['running', 'stopping'].includes(task.status) && <button className={`${button} mt-3`} disabled={busy || task.status === 'stopping'} onClick={() => perform(async () => {
               const result = await api(`/english-learning/tasks/${task.id}/stop`, { method: 'POST' })
               if (alive.current) setTasks((old) => old.map((t) => t.id === task.id ? result.task : t))

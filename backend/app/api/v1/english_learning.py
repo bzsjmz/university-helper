@@ -3,7 +3,7 @@ import asyncio
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field, SecretStr
+from pydantic import BaseModel, Field, SecretStr, StrictBool, model_validator
 
 from app.dependencies import get_current_user_id
 from app.services.course.english.clients import PlatformError
@@ -24,7 +24,17 @@ class ItemsRequest(BaseModel):
 
 class StartRequest(ItemsRequest):
     item: str = Field(min_length=1, max_length=256)
+    mode: Literal['study', 'answer'] = 'study'
+    submit: StrictBool = False
+    allow_ai: StrictBool = False
     seconds: int = Field(default=60, ge=30, le=1800, strict=True)
+
+
+    @model_validator(mode='after')
+    def answering_options(self):
+        if self.mode != 'answer' and (self.submit or self.allow_ai):
+            raise ValueError('自动提交与 AI 选项仅适用于自动答题模式')
+        return self
 
 
 async def call(function, *args):
@@ -47,7 +57,8 @@ async def items(sid: str, request: ItemsRequest, owner=Depends(get_current_user_
 
 @router.post('/sessions/{sid}/tasks')
 async def start(sid: str, request: StartRequest, owner=Depends(get_current_user_id)):
-    return await call(english_manager.start, owner, sid, request.course, request.item, request.seconds)
+    return await call(english_manager.start, owner, sid, request.course, request.item, request.seconds,
+                      request.mode, request.submit, request.allow_ai)
 
 
 @router.delete('/sessions/{sid}')

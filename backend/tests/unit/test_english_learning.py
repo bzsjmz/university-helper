@@ -164,7 +164,7 @@ def test_api_authentication_and_owner_forwarding(monkeypatch):
     routes.english_manager.list.assert_called_once_with('alice')
     monkeypatch.setattr(routes.english_manager, 'start', Mock(return_value={'id': 'task'}))
     assert client.post('/sessions/s/tasks', json={'course': 'c', 'item': 'i', 'seconds': 60}).status_code == 200
-    routes.english_manager.start.assert_called_once_with('alice', 's', 'c', 'i', 60)
+    routes.english_manager.start.assert_called_once_with('alice', 's', 'c', 'i', 60, 'study', False, False)
     for seconds in (0, 1801, True, 30.5, '60'):
         assert client.post('/sessions/s/tasks', json={'course': 'c', 'item': 'i', 'seconds': seconds}).status_code == 422
 
@@ -190,3 +190,24 @@ def test_stop_also_cleans_orphan_browser_group(monkeypatch):
     EnglishManager.kill(process)
     kill.assert_called_once_with(12345, module.signal.SIGKILL)
     process.wait.assert_called_once()
+
+
+def test_answer_flags_are_strict_and_explicit():
+    from pydantic import ValidationError
+    from app.api.v1.english_learning import StartRequest
+    with pytest.raises(ValidationError):
+        StartRequest(course='c', item='i', allow_ai=True)
+    with pytest.raises(ValidationError):
+        StartRequest(course='c', item='i', mode='answer', submit='true')
+    request = StartRequest(course='c', item='i', mode='answer')
+    assert request.submit is False and request.allow_ai is False
+
+
+def test_public_counts_snapshot_is_detached_from_worker_updates():
+    task = {key: '' for key in ('id','platform','course_name','item_name','seconds','status','message',
+        'started_at','mode','submit','allow_ai')}
+    task['counts'] = {'answered': 1}
+    public = EnglishManager.public(task)
+    task['counts']['answered'] = 2
+    task['counts']['missing'] = 1
+    assert public['counts'] == {'answered': 1}

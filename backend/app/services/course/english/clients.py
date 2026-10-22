@@ -8,7 +8,7 @@ import json
 import re
 import time
 from contextlib import contextmanager
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 
 import requests
 
@@ -189,11 +189,11 @@ UNIPUS_ITEMS_JS = r"""() => {
     }
     if (!row || seen.has(row)) continue;
     seen.add(row);
-    for (const icon of row.querySelectorAll('.icon-yulan, .icon-wenben')) {
+    for (const icon of row.querySelectorAll('.icon-yulan, .icon-wenben, .icon-lianxi')) {
       if (!icon.getClientRects().length) continue;
       const id = String(results.length);
       icon.setAttribute('data-uh-reading', id);
-      results.push({id, name: (row.innerText || '').trim().slice(0,256), progress: ''});
+      results.push({id, name: (row.innerText || '').trim().slice(0,240) + (icon.classList.contains('icon-lianxi') ? ' · 练习/作业' : ' · 阅读'), progress: ''});
     }
   }
   return results;
@@ -201,12 +201,20 @@ UNIPUS_ITEMS_JS = r"""() => {
 
 
 @contextmanager
-def unipus_browser(credential):
+def unipus_browser(credential, platform='unipus'):
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
-        raise PlatformError('老版 U校园需要可选 Playwright 和 Chromium 运行环境，当前后端尚未安装') from None
-    state = storage_state(credential)
+        raise PlatformError('自动答题需要 Playwright 和 Chromium 运行环境，当前后端尚未安装') from None
+    if platform == 'welearn':
+        client = Welearn(credential)
+        state = {'cookies': [{'name': c.name, 'value': c.value, 'domain': c.domain,
+                             'path': c.path, 'secure': True} for c in client.session.cookies], 'origins': []}
+        client.session.close()
+        domain = 'sflep.com'
+    else:
+        state = storage_state(credential)
+        domain = 'unipus.cn'
     with sync_playwright() as p:
         # Keep Chromium's sandbox enabled. Never request camera/microphone access.
         browser = p.chromium.launch(headless=True, chromium_sandbox=True)
@@ -216,7 +224,7 @@ def unipus_browser(credential):
             def guard(route):
                 parsed = urlsplit(route.request.url)
                 host = parsed.hostname or ''
-                if (parsed.scheme == 'https' and (host == 'unipus.cn' or host.endswith('.unipus.cn'))
+                if (parsed.scheme == 'https' and (host == domain or host.endswith('.' + domain))
                         and parsed.port in (None, 443) and not parsed.username and not parsed.password):
                     route.continue_()
                 else:
@@ -230,7 +238,7 @@ def unipus_browser(credential):
             browser.close()
 
 
-def unipus(credential, url, *, item=None, seconds=0, expected_name=None):
+def unipus(credential, url, *, item=None, seconds=0, expected_name=None, solve=None, submit=False):
     url = course_url(url)
     with unipus_browser(credential) as (context, page):
         page.goto(url, wait_until='domcontentloaded')
@@ -247,9 +255,28 @@ def unipus(credential, url, *, item=None, seconds=0, expected_name=None):
         opened = [p for p in context.pages if p not in before]
         target = opened[-1] if opened else page
         target.wait_for_load_state('domcontentloaded')
+        if solve is not None:
+            from .forms import answer_page
+            return answer_page(target, solve, submit=submit, deadline=time.monotonic() + seconds)
         for frame in target.frames:
             if frame.locator('input:not([type=hidden]), textarea, select').count():
                 return {'status': 'needs_manual', 'message': '该内容含交互题目，请在官网人工处理；未提交答案'}
         # Real page stays open; no synthetic score/time/completion requests.
         target.wait_for_timeout(seconds * 1000)
         return {'status': 'finished', 'message': '阅读页面停留已结束，实际进度和时长以官网为准'}
+
+
+def welearn_answer(credential, cid, item, seconds, solve, submit=False):
+    client = Welearn(credential)
+    try:
+        identity, items = client.items(cid)
+    finally:
+        client.session.close()
+    if item not in {i['id'] for i in items}:
+        raise PlatformError('该小节不属于所选课程或尚未开放')
+    url = Welearn.BASE + '/student/StudyCourse.aspx?' + urlencode({**identity, 'sco': item})
+    with unipus_browser(credential, platform='welearn') as (_, page):
+        page.goto(url, wait_until='domcontentloaded')
+        page.wait_for_timeout(2000)
+        from .forms import answer_page
+        return answer_page(page, solve, submit=submit, deadline=time.monotonic() + seconds)

@@ -2,12 +2,20 @@
 import json
 import sys
 
-from .clients import PlatformError, Welearn, unipus
+from .clients import PlatformError, Welearn, unipus, welearn_answer
+
+
+def ask_parent(question):
+    print(json.dumps({'event': 'question', 'question': question}, ensure_ascii=False), flush=True)
+    response = sys.stdin.buffer.readline(150_001)
+    if not response or len(response) > 150_000:
+        raise PlatformError('答题通道已关闭')
+    return json.loads(response)
 
 
 def main():
     try:
-        request = json.loads(sys.stdin.buffer.read(150_001))
+        request = json.loads(sys.stdin.buffer.readline(150_001))
         platform, action = request['platform'], request['action']
         if platform == 'welearn':
             client = Welearn(request['credential'])
@@ -17,15 +25,19 @@ def main():
                 elif action == 'items':
                     _, items = client.items(request['course'])
                     result = {'items': items}
+                elif action == 'answer':
+                    result = welearn_answer(request['credential'], request['course'], request['item'],
+                        request['seconds'], ask_parent, submit=request.get('submit', False))
                 else:
                     result = client.study(request['course'], request['item'], request['seconds'])
             finally:
                 client.session.close()
         else:
             result = unipus(request['credential'], request['course'],
-                item=request.get('item') if action == 'study' else None,
-                seconds=request.get('seconds', 0), expected_name=request.get('expected_name'))
-        print(json.dumps({'ok': True, **result}, ensure_ascii=False))
+                item=request.get('item') if action in ('study', 'answer') else None,
+                seconds=request.get('seconds', 0), expected_name=request.get('expected_name'),
+                solve=ask_parent if action == 'answer' else None, submit=request.get('submit', False))
+        print(json.dumps({'ok': True, **result}, ensure_ascii=False), flush=True)
     except PlatformError as exc:
         print(json.dumps({'ok': False, 'message': str(exc)}, ensure_ascii=False))
     except Exception:
