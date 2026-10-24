@@ -5,12 +5,12 @@ authentication itself runs in the platform's page, never a forged token endpoint
 """
 import base64
 import json
-import sys
 import time
 from urllib.parse import urlsplit
 
 from .clients import PlatformError, Welearn, course_url, storage_state
 from .login_view import login_picture
+from .login_handoff import WechatHandoff, read_login_command
 
 LOGIN_URLS = {
     'welearn': 'https://welearn.sflep.com/user/prelogin.aspx?loginret=https%3A%2F%2Fwelearn.sflep.com%2Fstudent%2Findex.aspx',
@@ -162,6 +162,7 @@ def login_browser(request):
     from playwright.sync_api import Error, sync_playwright
     platform = request['platform']
     method = request.get('method', 'password')
+    handoff = WechatHandoff()
     if method not in ('password', 'wechat') or (method == 'wechat' and platform != 'welearn'):
         raise PlatformError('不支持此登录方式')
     with sync_playwright() as p:
@@ -215,6 +216,10 @@ def login_browser(request):
                             qr_picture, qr_status = wechat_picture(page)
                             if qr_picture:
                                 picture, display_mode = qr_picture, 'qr'
+                        returning = method == 'wechat' and handoff.seen_qr and qr_status is None and picture is None
+                        if method == 'wechat' and result is None and handoff.observe(page, picture, qr_status):
+                            page = handoff.resume(context, page)
+                            picture, returning = None, True
                         image = base64.b64encode(picture).decode() if picture and result is None else ''
                         break
                     except Error:
@@ -232,12 +237,14 @@ def login_browser(request):
                         '正在等待微信授权返回。未绑定的微信请先到 WE Learn 官网完成绑定。')
                 if platform == 'unipus' and urlsplit(page.url).hostname == 'u.unipus.cn':
                     message = '请在下方官网画面中点选课程，系统会自动读取课程目录。'
-                if not image:
+                if returning:
+                    message = '微信授权已离开扫码页，正在连接 WE Learn 并读取课程，请稍候。'
+                elif not image:
                     message = '平台登录页面暂时空白，正在等待加载。可点击“重新加载页面”，或取消后重试登录。'
                 print(json.dumps({'ok': True, 'status': 'verification', 'image': image,
-                                  'image_type': 'png', 'display_mode': display_mode, 'qr_status': qr_status, 'view_state': 'ready' if image else 'blank',
+                                  'image_type': 'png', 'display_mode': display_mode, 'qr_status': qr_status, 'view_state': 'loading' if returning else ('ready' if image else 'blank'),
                                   'message': message}), flush=True)
-                raw = sys.stdin.buffer.readline(4097)
+                raw = read_login_command(page, deadline)
                 if not raw or len(raw) > 4096:
                     return
                 command = json.loads(raw)

@@ -216,3 +216,31 @@ sys.stdin.buffer.readline()
     with pytest.raises(PlatformError): manager.logins.exchange('bob', lid)
     manager.logins.cancel('alice', lid)
     assert not manager.processes and not manager.logins.jobs
+
+
+def test_wechat_blank_callback_resumes_fixed_course_entry_once_without_replaying_code():
+    from app.services.course.english.login_handoff import WechatHandoff
+    from app.services.course.english.login_browser import LOGIN_URLS
+    handoff = WechatHandoff()
+    page = Mock(url='https://sso.sflep.com/idsvr/signin-weixin?code=private-code')
+    page.is_closed.return_value = False
+    assert not handoff.observe(page, None, None)  # Never resume an initial blank login.
+    assert not handoff.observe(page, b'qr', 'waiting')
+    assert not handoff.observe(page, None, None)
+    assert handoff.observe(page, None, None)
+    assert handoff.resume(Mock(), page) is page
+    page.goto.assert_called_once_with(LOGIN_URLS['welearn'], wait_until='domcontentloaded', timeout=20000)
+    assert not handoff.observe(page, None, None)
+    assert 'private-code' not in str(page.goto.call_args)
+
+
+def test_wechat_handoff_does_not_interfere_with_binding_or_password_forms():
+    from app.services.course.english.login_handoff import WechatHandoff
+    handoff = WechatHandoff()
+    page = Mock(url='https://sso.sflep.com/idsvr/bind.html')
+    handoff.observe(page, b'qr', 'waiting')
+    page.locator.return_value.count.return_value = 0
+    assert not handoff.observe(page, b'form', None)
+    page.url = 'https://sso.sflep.com/idsvr/login.html'
+    page.locator.return_value.count.return_value = 2
+    assert not handoff.observe(page, b'form', None)

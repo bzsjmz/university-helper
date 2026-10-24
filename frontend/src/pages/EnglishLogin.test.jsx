@@ -137,3 +137,19 @@ test('expired QR is hidden, pending QR can be recovered, and U-campus has no WeC
   await user.click(screen.getByRole('button', { name: '取消登录' }))
   await screen.findByRole('button', { name: '微信扫码登录' })
 })
+
+test('OAuth return shows course connection progress instead of a blank-page warning', async () => {
+  mocks.api.mockImplementation(async (path, options) => {
+    if (path === '/english-learning/tasks') return { tasks: [] }
+    if (path === '/english-learning/logins') return options?.method === 'POST'
+      ? { ...verify, image: '', view_state: 'loading', message: '微信授权已返回，正在读取课程。' } : { logins: [] }
+    return {}
+  })
+  const user = userEvent.setup()
+  render(<EnglishLearning />)
+  await login(user)
+  await screen.findByText('正在连接课程，请稍候…')
+  expect(screen.queryByText('登录页面尚未显示内容，请稍候或重新加载页面。')).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: '重新加载页面' })).not.toBeInTheDocument()
+  expect(screen.getByRole('button', { name: '取消登录' })).toBeEnabled()
+})

@@ -133,7 +133,7 @@ class PasswordLogins:
                     job['public'] = {'login_id': lid, 'status': 'verification', 'image': image,
                                      'message': result.get('message', '请完成平台登录验证'),
                                      'image_type': 'png' if result.get('image_type') == 'png' else 'jpeg',
-                                     'view_state': 'blank' if result.get('view_state') == 'blank' else 'ready',
+                                     'view_state': result.get('view_state') if result.get('view_state') in ('blank', 'loading') else 'ready',
                                      'display_mode': 'qr' if result.get('display_mode') == 'qr' else 'page',
                                      'qr_status': result.get('qr_status') if result.get('qr_status') in ('waiting', 'scanned', 'expired') else None}
                 else:

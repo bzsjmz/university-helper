@@ -172,7 +172,7 @@ export default function EnglishLogin({ onConnected }) {
     {login && <div className="space-y-3" aria-label="平台登录验证">
       <p>{login.message || '正在读取平台登录状态…'}</p>
       <div className="flex flex-wrap gap-2">
-        {login.display_mode === 'qr' ? <button className={button} disabled={busy} onClick={() => act({ action: 'reload' })}>刷新二维码</button> : <>
+        {login.view_state === 'loading' ? <span role="status" className="text-sm text-text-muted">正在连接课程，请稍候…</span> : login.display_mode === 'qr' ? <button className={button} disabled={busy} onClick={() => act({ action: 'reload' })}>刷新二维码</button> : <>
         <button className={button} disabled={busy} onClick={() => act({ action: 'refresh' })}>刷新画面</button>
         <button className={button} disabled={busy} onClick={() => act({ action: 'reload' })}>重新加载页面</button>
         <button className={button} disabled={busy} onClick={() => act({ action: 'top' })}>回到页面顶部</button>

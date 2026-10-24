@@ -1,6 +1,8 @@
 """Offline real-Chromium login handoff; all pages are synthetic, no real account."""
 from contextlib import contextmanager, redirect_stdout
 import io
+import os
+import threading
 import json
 import types
 import unittest
@@ -52,7 +54,7 @@ class BrowserLoginTest(unittest.TestCase):
         output = io.StringIO()
         request = {'platform': platform, 'username': 'fixture-user', 'password': 'fixture-password'}
         with patch('playwright.sync_api.sync_playwright', playwright_fixture), \
-                patch('app.services.course.english.login_browser.sys.stdin', fake_stdin), \
+                patch('app.services.course.english.login_handoff.sys.stdin', fake_stdin), \
                 patch('app.services.course.english.login_browser.Welearn.courses',
                       return_value=[{'id': '1', 'name': 'My English'}]), redirect_stdout(output):
             login_browser(request)
@@ -154,7 +156,7 @@ class BrowserLoginTest(unittest.TestCase):
                 return b'{"action":"refresh"}\n'
         output = io.StringIO()
         with patch('playwright.sync_api.sync_playwright', fixture), \
-                patch('app.services.course.english.login_browser.sys.stdin', types.SimpleNamespace(buffer=Commands())), \
+                patch('app.services.course.english.login_handoff.sys.stdin', types.SimpleNamespace(buffer=Commands())), \
                 patch('app.services.course.english.login_browser.Welearn.courses', return_value=[{'id':'c','name':'English'}]), redirect_stdout(output):
             login_browser({'platform':'welearn','method':'wechat'})
         replies = [json.loads(line) for line in output.getvalue().splitlines()]
@@ -165,6 +167,69 @@ class BrowserLoginTest(unittest.TestCase):
             self.assertLess(len(reply['image']), 50000)
         self.assertEqual(replies[-1]['status'], 'connected')
         self.assertIn('fixture-cookie', replies[-1]['credential'])
+
+    def test_oauth_redirect_is_processed_while_no_ui_command_is_available(self):
+        from app.services.course.english.login_handoff import read_login_command
+        import time
+        observed = threading.Event()
+        read_fd, write_fd = os.pipe()
+        stream = os.fdopen(read_fd, 'rb', buffering=0)
+        with real_playwright() as p:
+            browser = p.chromium.launch(headless=True, chromium_sandbox=True)
+            try:
+                context = browser.new_context()
+                def route(r):
+                    if '/callback' in r.request.url:
+                        observed.set()
+                        r.fulfill(content_type='text/html', body='<h1>Authorized</h1>')
+                    else:
+                        r.fulfill(content_type='text/html', body='<script>setTimeout(()=>location.href="/callback", 400)</script>')
+                context.route('**/*', route)
+                page = context.new_page()
+                page.goto('https://sso.sflep.com/login')
+                def writer():
+                    # Only send the next command after the browser's routed callback
+                    # has actually executed; a blocking stdin implementation fails.
+                    success = observed.wait(4)
+                    os.write(write_fd, b'{"action":"refresh"}\n' if success else b'')
+                    os.close(write_fd)
+                thread = threading.Thread(target=writer)
+                thread.start()
+                with patch('app.services.course.english.login_handoff.sys.stdin', types.SimpleNamespace(buffer=stream)):
+                    command = read_login_command(page, time.monotonic() + 6)
+                thread.join(5)
+                self.assertTrue(observed.is_set())
+                self.assertEqual(json.loads(command), {'action': 'refresh'})
+                self.assertFalse(thread.is_alive())
+            finally:
+                stream.close()
+                browser.close()
+
+    def test_blank_sso_callback_reopens_original_welearn_with_same_context(self):
+        from app.services.course.english.login_handoff import WechatHandoff
+        with real_playwright() as p:
+            browser = p.chromium.launch(headless=True, chromium_sandbox=True)
+            try:
+                context = browser.new_context(viewport={'width':1000,'height':760})
+                def route(r):
+                    if '/signin-weixin' in r.request.url:
+                        r.fulfill(content_type='text/html', body='<html><body></body></html>')
+                    else:
+                        self.assertTrue(any(c['name']=='sso-fixture' for c in context.cookies()))
+                        r.fulfill(content_type='text/html', body='<h1>Course portal</h1>')
+                context.route('**/*', route)
+                page = context.new_page()
+                context.add_cookies([{'name':'sso-fixture','value':'private-fixture','url':'https://sso.sflep.com'}])
+                page.goto('https://sso.sflep.com/idsvr/signin-weixin?code=fixture')
+                handoff = WechatHandoff()
+                handoff.observe(page, b'qr', 'waiting')
+                self.assertFalse(handoff.observe(page, None, None))
+                self.assertTrue(handoff.observe(page, None, None))
+                page = handoff.resume(context, page)
+                self.assertIn('welearn.sflep.com/user/prelogin.aspx', page.url)
+                self.assertEqual(page.locator('h1').inner_text(), 'Course portal')
+                self.assertFalse(handoff.observe(page, None, None))
+            finally: browser.close()
 
     def test_password_without_verification_connects_directly(self):
         self.assertEqual(len(self.run_flow('welearn')), 1)
