@@ -158,3 +158,61 @@ def test_reload_stays_on_platform_and_uses_get_instead_of_replaying_post():
     page.url = 'https://untrusted.example/'
     with pytest.raises(PlatformError):
         operate(page, {'action': 'reload', 'platform': 'welearn'})
+
+
+def test_wechat_entry_requires_auth_and_has_no_password_or_platform_input(monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from app.api.v1 import english_learning as routes
+    from app.dependencies import get_current_user_id
+    app = FastAPI()
+    app.include_router(routes.router)
+    client = TestClient(app)
+    assert client.post('/logins/wechat').status_code == 401
+    app.dependency_overrides[get_current_user_id] = lambda: 'alice'
+    monkeypatch.setattr(routes.english_manager.logins, 'start_wechat', Mock(return_value={'status': 'verification'}))
+    response = client.post('/logins/wechat')
+    assert response.status_code == 200 and response.headers['cache-control'] == 'no-store'
+    routes.english_manager.logins.start_wechat.assert_called_once_with('alice')
+
+
+def test_wechat_hosts_are_exact_scoped_and_cannot_be_exported_as_platform_credentials():
+    from app.services.course.english.login_browser import allowed_login_url, allowed_login_request
+    for host in ('open.weixin.qq.com.evil.test', 'localhost.weixin.qq.com', 'evil.qq.com', '127.0.0.1'):
+        assert not allowed_login_url('https://' + host, 'welearn', 'wechat')
+    url = 'https://open.weixin.qq.com/connect/qrconnect'
+    assert allowed_login_url(url, 'welearn', 'wechat')
+    assert not allowed_url(url, 'welearn')
+    assert not allowed_login_url(url, 'welearn', 'password')
+    assert not allowed_login_url(url, 'unipus', 'wechat')
+    for host in ('res.wx.qq.com', 'lp.open.weixin.qq.com'):
+        req = Mock(url='https://' + host + '/asset', method='GET')
+        req.is_navigation_request.return_value = False
+        assert allowed_login_request(req, 'welearn', 'wechat')
+        assert not allowed_login_request(req, 'welearn', 'password')
+        req.method = 'POST'
+        assert not allowed_login_request(req, 'welearn', 'wechat')
+        req.method = 'GET'
+        req.is_navigation_request.return_value = True
+        assert not allowed_login_request(req, 'welearn', 'wechat')
+
+
+def test_wechat_uses_same_owner_limit_cleanup_and_never_sends_credentials(manager, monkeypatch):
+    def worker(temporary_dir=None):
+        code = '''import json,sys
+request=json.loads(sys.stdin.buffer.readline())
+assert request=={'action':'login','platform':'welearn','method':'wechat'}
+print(json.dumps({'ok':True,'status':'verification','image':'fixture','image_type':'png',
+ 'display_mode':'qr','qr_status':'waiting'}),flush=True)
+sys.stdin.buffer.readline()
+'''
+        return subprocess.Popen([sys.executable, '-B', '-c', code], stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, start_new_session=True)
+    monkeypatch.setattr(manager, '_spawn', worker)
+    result = manager.logins.start_wechat('alice')
+    assert result['display_mode'] == 'qr' and result['qr_status'] == 'waiting'
+    lid = result['login_id']
+    with pytest.raises(PlatformError): manager.logins.start('alice', 'welearn', 'user', 'password')
+    with pytest.raises(PlatformError): manager.logins.exchange('bob', lid)
+    manager.logins.cancel('alice', lid)
+    assert not manager.processes and not manager.logins.jobs

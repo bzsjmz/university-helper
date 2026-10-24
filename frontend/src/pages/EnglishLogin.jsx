@@ -89,6 +89,22 @@ export default function EnglishLogin({ onConnected }) {
     } finally { if (alive.current) setBusy(false) }
   }
 
+  const loginWithWechat = async () => {
+    setBusy(true)
+    setMessage('正在获取微信登录二维码…')
+    setPassword('')
+    try {
+      const result = await api('/english-learning/logins/wechat', { method: 'POST', timeoutMs: 55000 })
+      if (alive.current) { setMessage(''); acceptRef.current(result) }
+    } catch (error) {
+      if (alive.current) setMessage(error.message)
+      try {
+        const result = await api('/english-learning/logins')
+        if (alive.current && result.logins?.length) acceptRef.current(result.logins[0])
+      } catch (_) { /* A pending QR window can be recovered on refresh. */ }
+    } finally { if (alive.current) setBusy(false) }
+  }
+
   const act = async (command) => {
     if (!activeId.current || busy) return
     setBusy(true)
@@ -127,6 +143,10 @@ export default function EnglishLogin({ onConnected }) {
         <p className="text-sm text-text-muted">使用所选平台的账号密码。遇到验证码时在本页完成验证，登录后直接选择课程。</p>
         <button className={button} disabled={busy || !username.trim() || !password}>{busy ? '登录中…' : '登录并读取课程'}</button>
       </form>
+      {platform === 'welearn' && <div className="space-y-2 border-t border-border pt-4">
+        <button type="button" className={button} disabled={busy} onClick={loginWithWechat}>微信扫码登录</button>
+        <p className="text-sm text-text-muted">适用于已绑定微信的 WE Learn 账号，无需填写账号密码。扫码后在手机微信中确认。</p>
+      </div>}
       <details className="text-sm">
         <summary className="cursor-pointer text-text-muted">高级：导入已有登录会话</summary>
         <form className="mt-3 space-y-3" onSubmit={async (event) => {
@@ -152,12 +172,17 @@ export default function EnglishLogin({ onConnected }) {
     {login && <div className="space-y-3" aria-label="平台登录验证">
       <p>{login.message || '正在读取平台登录状态…'}</p>
       <div className="flex flex-wrap gap-2">
+        {login.display_mode === 'qr' ? <button className={button} disabled={busy} onClick={() => act({ action: 'reload' })}>刷新二维码</button> : <>
         <button className={button} disabled={busy} onClick={() => act({ action: 'refresh' })}>刷新画面</button>
         <button className={button} disabled={busy} onClick={() => act({ action: 'reload' })}>重新加载页面</button>
         <button className={button} disabled={busy} onClick={() => act({ action: 'top' })}>回到页面顶部</button>
+        </>}
       </div>
       {login.view_state === 'blank' && <p role="status" className="rounded-lg border border-border p-4">登录页面尚未显示内容，请稍候或重新加载页面。</p>}
-      {login.image && login.view_state !== 'blank' && <>
+      {login.display_mode === 'qr' && login.image && login.qr_status !== 'expired' && <img
+        className="mx-auto h-auto w-72 max-w-full rounded-lg bg-white p-3" style={{ imageRendering: 'pixelated' }}
+        src={`data:image/png;base64,${login.image}`} alt="WE Learn 微信登录二维码" draggable={false} />}
+      {login.display_mode !== 'qr' && login.image && login.view_state !== 'blank' && <>
         <p className="text-sm text-text-muted">下面是平台的登录页面。可以直接点选、拖动；需要填写验证码时，先点选画面中的输入框，再在下方输入文字。</p>
         <button type="button" className="block w-full border border-border p-0" aria-label="平台验证页面"
           style={{ touchAction: 'none' }} disabled={busy}

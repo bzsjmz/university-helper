@@ -84,6 +84,11 @@ async def password_login(request: PasswordLoginRequest, owner=Depends(get_curren
                       request.username.get_secret_value(), request.password.get_secret_value())
 
 
+@router.post('/logins/wechat')
+async def wechat_login(owner=Depends(get_current_user_id)):
+    return await call(english_manager.logins.start_wechat, owner)
+
+
 @router.get('/logins')
 async def pending_logins(owner=Depends(get_current_user_id)):
     return {'logins': await call(english_manager.logins.list, owner)}

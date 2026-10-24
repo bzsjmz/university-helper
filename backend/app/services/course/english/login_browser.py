@@ -27,6 +27,40 @@ def allowed_url(url, platform):
             and parsed.port in (None, 443) and not parsed.username and not parsed.password)
 
 
+def allowed_login_url(url, platform, method='password'):
+    if allowed_url(url, platform):
+        return True
+    parsed = urlsplit(url)
+    return (platform == 'welearn' and method == 'wechat' and parsed.scheme == 'https'
+            and parsed.hostname == 'open.weixin.qq.com' and parsed.port in (None, 443)
+            and not parsed.username and not parsed.password)
+
+
+def allowed_login_request(request, platform, method):
+    if allowed_login_url(request.url, platform, method):
+        return True
+    parsed = urlsplit(request.url)
+    # Exact official QR asset/polling hosts only. Desktop WeChat's localhost
+    # helper and unrelated QQ/WeChat sites remain unavailable to this browser.
+    return (platform == 'welearn' and method == 'wechat' and parsed.scheme == 'https'
+            and parsed.hostname in ('res.wx.qq.com', 'lp.open.weixin.qq.com')
+            and parsed.port in (None, 443) and not parsed.username and not parsed.password
+            and request.method == 'GET' and not request.is_navigation_request())
+
+
+def wechat_picture(page):
+    for frame in page.frames:
+        if urlsplit(frame.url).hostname != 'open.weixin.qq.com':
+            continue
+        text = frame.locator('body').inner_text(timeout=2000)[:10000]
+        status = 'expired' if any(t in text for t in ('已失效', '已过期')) else (
+            'scanned' if any(t in text for t in ('扫描成功', '扫码成功', '请在微信中确认', '请在手机上确认')) else 'waiting')
+        for image in frame.locator('img.js_qrcode_img, img.qrcode').all()[:8]:
+            if image.is_visible() and image.evaluate('(e)=>e.complete && e.naturalWidth >= 120'):
+                return image.screenshot(type='png', timeout=3000), status
+    return None, None
+
+
 def courses_from_links(links):
     courses, seen = [], set()
     for link in links[:1000]:
@@ -115,7 +149,7 @@ def operate(page, command):
         page.mouse.wheel(0, delta)
     elif action == 'reload':
         # GET the current official URL; never replay a password form POST.
-        if not allowed_url(page.url, command.get('platform', 'welearn')):
+        if not allowed_login_url(page.url, command.get('platform', 'welearn'), command.get('method', 'password')):
             raise PlatformError('登录页面地址异常，请取消后重新登录')
         page.goto(page.url, wait_until='domcontentloaded')
     elif action == 'top':
@@ -127,31 +161,39 @@ def operate(page, command):
 def login_browser(request):
     from playwright.sync_api import Error, sync_playwright
     platform = request['platform']
+    method = request.get('method', 'password')
+    if method not in ('password', 'wechat') or (method == 'wechat' and platform != 'welearn'):
+        raise PlatformError('不支持此登录方式')
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True, chromium_sandbox=True)
         try:
             context = browser.new_context(viewport={'width': WIDTH, 'height': HEIGHT},
                                           accept_downloads=False, service_workers='block')
             context.route('**/*', lambda route: route.continue_()
-                          if allowed_url(route.request.url, platform) else route.abort())
+                          if allowed_login_request(route.request, platform, method) else route.abort())
             page = context.new_page()
             page.set_default_timeout(5000)
             page.set_default_navigation_timeout(20000)
             page.goto(LOGIN_URLS[platform], wait_until='domcontentloaded')
-            page.locator('[name="username"]:visible').fill(request.pop('username'))
-            page.locator('[name="password"]:visible').fill(request.pop('password'))
-            # Leave agreements and verification to the user. A prefilled official
-            # page is shown when these are required, without exporting cookies.
-            checkboxes = page.locator('input[type="checkbox"]:visible').all()
-            requires_agreement = any(not c.is_checked() and c.get_attribute('name') != 'rememberMe'
-                                     for c in checkboxes)
-            requires_code = any(not c.input_value() for c in
-                                page.locator('input[placeholder*="验证码"]:visible').all())
-            if not requires_agreement and not requires_code:
-                buttons = page.get_by_role('button', name='登录', exact=True).all()
-                visible = [b for b in buttons if b.is_visible() and b.is_enabled()]
-                if len(visible) == 1:
-                    visible[0].click()
+            if method == 'wechat':
+                # Click the real SSO entry so its OAuth state and redirect remain
+                # paired with this private context; never construct our own token URL.
+                page.locator('img[src*="/wx-"]').click()
+            else:
+                page.locator('[name="username"]:visible').fill(request.pop('username'))
+                page.locator('[name="password"]:visible').fill(request.pop('password'))
+                # Leave agreements and verification to the user. A prefilled official
+                # page is shown when these are required, without exporting cookies.
+                checkboxes = page.locator('input[type="checkbox"]:visible').all()
+                requires_agreement = any(not c.is_checked() and c.get_attribute('name') != 'rememberMe'
+                                         for c in checkboxes)
+                requires_code = any(not c.input_value() for c in
+                                    page.locator('input[placeholder*="验证码"]:visible').all())
+                if not requires_agreement and not requires_code:
+                    buttons = page.get_by_role('button', name='登录', exact=True).all()
+                    visible = [b for b in buttons if b.is_visible() and b.is_enabled()]
+                    if len(visible) == 1:
+                        visible[0].click()
             page.wait_for_timeout(1500)
             deadline = time.monotonic() + 600
             while time.monotonic() < deadline:
@@ -159,8 +201,20 @@ def login_browser(request):
                 # taking its picture. Retry only reads, never the user's action.
                 for attempt in range(3):
                     try:
-                        page, picture = login_picture(context, page, platform)
-                        result = authenticated_result(context, page, platform)
+                        result = None
+                        for candidate in reversed(context.pages[-4:]):
+                            if not candidate.is_closed():
+                                result = authenticated_result(context, candidate, platform)
+                                if result is not None:
+                                    break
+                        picture = None
+                        if result is None:
+                            page, picture = login_picture(context, page, platform, method)
+                        display_mode, qr_status = 'page', None
+                        if method == 'wechat' and result is None:
+                            qr_picture, qr_status = wechat_picture(page)
+                            if qr_picture:
+                                picture, display_mode = qr_picture, 'qr'
                         image = base64.b64encode(picture).decode() if picture and result is None else ''
                         break
                     except Error:
@@ -170,19 +224,25 @@ def login_browser(request):
                 if result is not None:
                     print(json.dumps({'ok': True, 'status': 'connected', **result}), flush=True)
                     return
-                message = '请在下方官网画面中完成验证码或协议确认，再点击画面中的登录按钮。'
+                message = '请按下方平台官网提示完成登录，登录成功后自动读取课程。'
+                if method == 'wechat':
+                    message = {'waiting': '请用已绑定 WE Learn 账号的微信扫描二维码，并在手机上确认登录。',
+                               'scanned': '扫码成功，请在手机微信中确认登录。',
+                               'expired': '二维码已过期，请点击“刷新二维码”重新获取。'}.get(qr_status,
+                        '正在等待微信授权返回。未绑定的微信请先到 WE Learn 官网完成绑定。')
                 if platform == 'unipus' and urlsplit(page.url).hostname == 'u.unipus.cn':
                     message = '请在下方官网画面中点选课程，系统会自动读取课程目录。'
                 if not image:
                     message = '平台登录页面暂时空白，正在等待加载。可点击“重新加载页面”，或取消后重试登录。'
                 print(json.dumps({'ok': True, 'status': 'verification', 'image': image,
-                                  'image_type': 'png', 'view_state': 'ready' if image else 'blank',
+                                  'image_type': 'png', 'display_mode': display_mode, 'qr_status': qr_status, 'view_state': 'ready' if image else 'blank',
                                   'message': message}), flush=True)
                 raw = sys.stdin.buffer.readline(4097)
                 if not raw or len(raw) > 4096:
                     return
                 command = json.loads(raw)
                 command['platform'] = platform
+                command['method'] = method
                 operate(page, command)
                 page.wait_for_timeout(500)
         finally:

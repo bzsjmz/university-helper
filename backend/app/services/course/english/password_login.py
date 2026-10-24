@@ -20,6 +20,12 @@ class PasswordLogins:
         self.jobs = {}
 
     def start(self, owner, platform, username, password):
+        return self._start(owner, platform, {'username': username, 'password': password})
+
+    def start_wechat(self, owner):
+        return self._start(owner, 'welearn', {'method': 'wechat'})
+
+    def _start(self, owner, platform, login_request):
         self.cleanup()
         with self.lock, self.manager.lock:
             if self.manager.closing:
@@ -38,12 +44,12 @@ class PasswordLogins:
                 raise PlatformError('无法打开登录页面，请稍后重试') from None
             self.manager.processes.add(process)
             lid = uuid4().hex
-            job = {'owner': owner, 'platform': platform, 'process': process,
+            job = {'owner': owner, 'platform': platform, 'method': login_request.get('method', 'password'), 'process': process,
                    'created': time.monotonic(), 'io': threading.Lock(), 'buffer': b'', 'temporary': temporary,
                    'public': {'login_id': lid, 'status': 'starting', 'message': '正在登录'}}
             self.jobs[lid] = job
         return self.exchange(owner, lid, {'action': 'login', 'platform': platform,
-                            'username': username, 'password': password})
+                            **login_request})
 
     def _job(self, owner, lid):
         job = self.jobs.get(lid)
@@ -127,7 +133,9 @@ class PasswordLogins:
                     job['public'] = {'login_id': lid, 'status': 'verification', 'image': image,
                                      'message': result.get('message', '请完成平台登录验证'),
                                      'image_type': 'png' if result.get('image_type') == 'png' else 'jpeg',
-                                     'view_state': 'blank' if result.get('view_state') == 'blank' else 'ready'}
+                                     'view_state': 'blank' if result.get('view_state') == 'blank' else 'ready',
+                                     'display_mode': 'qr' if result.get('display_mode') == 'qr' else 'page',
+                                     'qr_status': result.get('qr_status') if result.get('qr_status') in ('waiting', 'scanned', 'expired') else None}
                 else:
                     raise PlatformError('登录页面返回异常，请重新登录')
                 return dict(job['public'])
@@ -135,7 +143,8 @@ class PasswordLogins:
             with self.lock:
                 self._close(job)
                 job['public'] = {'login_id': lid, 'status': 'failed',
-                                 'message': '登录未完成或窗口已过期，请检查账号密码后重试'}
+                                 'message': ('微信登录未完成或窗口已过期，请重新获取二维码' if job['method'] == 'wechat'
+                                             else '登录未完成或窗口已过期，请检查账号密码后重试')}
             return dict(job['public'])
         finally:
             job['io'].release()

@@ -68,13 +68,13 @@ def blank_png(data):
     return True
 
 
-def login_picture(context, current, platform):
+def login_picture(context, current, platform, method='password'):
     """Prefer the newest rendered official tab; ignore empty redirect popups."""
     from playwright.sync_api import Error
-    from .login_browser import allowed_url
+    from .login_browser import allowed_login_url
     deadline = time.monotonic() + 8
     for attempt in range(3):
-        candidates = [p for p in context.pages if not p.is_closed() and allowed_url(p.url, platform)][-4:]
+        candidates = [p for p in context.pages if not p.is_closed() and allowed_login_url(p.url, platform, method)][-4:]
         for page in reversed(candidates):
             if time.monotonic() >= deadline:
                 break
@@ -90,5 +90,5 @@ def login_picture(context, current, platform):
         if attempt < 2:
             context.pages[0].wait_for_timeout(500)
     # Keep a safe tab available for an explicit reload, but never show a blank image.
-    candidates = [p for p in context.pages if not p.is_closed() and allowed_url(p.url, platform)]
+    candidates = [p for p in context.pages if not p.is_closed() and allowed_login_url(p.url, platform, method)]
     return (candidates[-1] if candidates else current), None

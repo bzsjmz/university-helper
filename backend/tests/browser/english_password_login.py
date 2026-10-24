@@ -109,6 +109,63 @@ class BrowserLoginTest(unittest.TestCase):
             finally:
                 browser.close()
 
+    def test_wechat_qr_status_refresh_and_popup_callback_handoff(self):
+        holder = {}
+        svg = '<svg xmlns="http://www.w3.org/2000/svg" width="180" height="180"><rect width="180" height="180" fill="white"/><path d="M10 10h60v60H10zm90 0h60v60h-60zM10 100h60v60H10z" fill="black"/></svg>'
+        @contextmanager
+        def fixture():
+            with real_playwright() as p:
+                browser = p.chromium.launch(headless=True, chromium_sandbox=True)
+                def new_context(**kwargs):
+                    context = browser.new_context(**kwargs)
+                    holder['context'] = context
+                    def route(r):
+                        if r.request.url.endswith('.svg') or '/connect/qrcode/' in r.request.url:
+                            r.fulfill(content_type='image/svg+xml', body=svg)
+                        elif 'open.weixin.qq.com' in r.request.url:
+                            r.fulfill(content_type='text/html; charset=utf-8', body='<h1>微信登录</h1><img class="js_qrcode_img" src="/connect/qrcode/fixture"><p>微信扫一扫</p>')
+                        else:
+                            r.fulfill(content_type='text/html; charset=utf-8', body='<h1>Official SSO</h1><a target="_blank" href="https://open.weixin.qq.com/connect/qrconnect"><img src="/wx-fixture.svg"></a>')
+                    # Popup first navigations need context routing. Replace only
+                    # the fixture's install hook; network policy is tested separately.
+                    install_route = context.route
+                    context.route = lambda *args, **kwargs: install_route('**/*', route)
+                    return context
+                try:
+                    yield types.SimpleNamespace(chromium=types.SimpleNamespace(launch=lambda **kwargs:
+                        types.SimpleNamespace(new_context=new_context, close=browser.close)))
+                finally: browser.close()
+        class Commands:
+            step = 0
+            def readline(self, _):
+                context = holder['context']
+                page = context.pages[-1]
+                self.step += 1
+                if self.step == 1:
+                    page.locator('p').last.evaluate('(e)=>e.textContent="扫码成功，请在手机上确认"')
+                elif self.step == 2:
+                    page.locator('p').last.evaluate('(e)=>e.textContent="二维码已过期"')
+                elif self.step == 3:
+                    return b'{"action":"reload"}\n'
+                else:
+                    # Complete in the opener while the QR popup still exists.
+                    context.add_cookies([{'name':'sid','value':'fixture-cookie','url':'https://welearn.sflep.com'}])
+                    context.pages[0].goto('https://welearn.sflep.com/student/index.aspx')
+                return b'{"action":"refresh"}\n'
+        output = io.StringIO()
+        with patch('playwright.sync_api.sync_playwright', fixture), \
+                patch('app.services.course.english.login_browser.sys.stdin', types.SimpleNamespace(buffer=Commands())), \
+                patch('app.services.course.english.login_browser.Welearn.courses', return_value=[{'id':'c','name':'English'}]), redirect_stdout(output):
+            login_browser({'platform':'welearn','method':'wechat'})
+        replies = [json.loads(line) for line in output.getvalue().splitlines()]
+        self.assertEqual([r.get('qr_status') for r in replies[:-1]], ['waiting','scanned','expired','waiting'])
+        for reply in replies[:-1]:
+            self.assertEqual(reply['display_mode'], 'qr')
+            self.assertNotIn('credential', reply)
+            self.assertLess(len(reply['image']), 50000)
+        self.assertEqual(replies[-1]['status'], 'connected')
+        self.assertIn('fixture-cookie', replies[-1]['credential'])
+
     def test_password_without_verification_connects_directly(self):
         self.assertEqual(len(self.run_flow('welearn')), 1)
 

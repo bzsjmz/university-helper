@@ -101,3 +101,39 @@ test('blank login view gives recovery controls without an empty image or text en
   expect(await screen.findByRole('img', { name: '平台登录及验证码画面' })).toHaveAttribute('src', 'data:image/png;base64,ZmFrZQ==')
   expect(JSON.stringify(mocks.api.mock.calls.filter(([p]) => p.includes('/actions')))).not.toContain('private-password')
 })
+
+test('WeChat QR login needs no credentials, can renew QR, and hands off to courses', async () => {
+  const qr = { ...verify, display_mode: 'qr', image_type: 'png', qr_status: 'waiting', message: '请用微信扫码' }
+  mocks.api.mockImplementation(async (path, options) => {
+    if (path === '/english-learning/tasks') return { tasks: [] }
+    if (path === '/english-learning/logins') return { logins: [] }
+    if (path === '/english-learning/logins/wechat') return qr
+    if (path.endsWith('/actions') && JSON.parse(options.body).action === 'reload') return connected
+    return qr
+  })
+  const user = userEvent.setup()
+  render(<EnglishLearning />)
+  await user.click(await screen.findByRole('button', { name: '微信扫码登录' }))
+  const image = await screen.findByRole('img', { name: 'WE Learn 微信登录二维码' })
+  expect(image).toHaveAttribute('src', 'data:image/png;base64,ZmFrZQ==')
+  expect(screen.queryByLabelText('验证文字')).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: '平台验证页面' })).not.toBeInTheDocument()
+  expect(mocks.api.mock.calls.find(([path]) => path.endsWith('/wechat'))[1].body).toBeUndefined()
+  await user.click(screen.getByRole('button', { name: '刷新二维码' }))
+  await screen.findByRole('button', { name: '读取课程内容' })
+})
+
+test('expired QR is hidden, pending QR can be recovered, and U-campus has no WeChat entry', async () => {
+  const user = userEvent.setup()
+  const view = render(<EnglishLearning />)
+  await user.selectOptions(screen.getByLabelText('平台'), 'unipus')
+  expect(screen.queryByRole('button', { name: '微信扫码登录' })).not.toBeInTheDocument()
+  view.unmount()
+  mocks.api.mockImplementation(async (path) => path === '/english-learning/tasks' ? { tasks: [] }
+    : path === '/english-learning/logins' ? { logins: [{ ...verify, display_mode: 'qr', qr_status: 'expired' }] } : {})
+  render(<EnglishLearning />)
+  await screen.findByRole('button', { name: '刷新二维码' })
+  expect(screen.queryByRole('img', { name: 'WE Learn 微信登录二维码' })).not.toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: '取消登录' }))
+  await screen.findByRole('button', { name: '微信扫码登录' })
+})
