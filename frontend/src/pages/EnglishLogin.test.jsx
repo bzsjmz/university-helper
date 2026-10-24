@@ -81,3 +81,23 @@ test('scaled verification image sends bounded viewport coordinates and cancel cl
   expect(mocks.api).toHaveBeenCalledWith('/english-learning/logins/login1', { method: 'DELETE' })
   expect(screen.getByLabelText('密码')).toHaveValue('')
 })
+
+test('blank login view gives recovery controls without an empty image or text entry', async () => {
+  mocks.api.mockImplementation(async (path, options) => {
+    if (path === '/english-learning/tasks') return { tasks: [] }
+    if (path === '/english-learning/logins') return options?.method === 'POST'
+      ? { ...verify, image: '', view_state: 'blank' } : { logins: [] }
+    return { ...verify, image_type: 'png', view_state: 'ready' }
+  })
+  const user = userEvent.setup()
+  render(<EnglishLearning />)
+  await login(user)
+  await screen.findByText('登录页面尚未显示内容，请稍候或重新加载页面。')
+  expect(screen.queryByRole('img', { name: '平台登录及验证码画面' })).not.toBeInTheDocument()
+  expect(screen.queryByLabelText('验证文字')).not.toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: '重新加载页面' }))
+  await waitFor(() => expect(mocks.api).toHaveBeenCalledWith('/english-learning/logins/login1/actions',
+    expect.objectContaining({ body: JSON.stringify({ action: 'reload' }) })))
+  expect(await screen.findByRole('img', { name: '平台登录及验证码画面' })).toHaveAttribute('src', 'data:image/png;base64,ZmFrZQ==')
+  expect(JSON.stringify(mocks.api.mock.calls.filter(([p]) => p.includes('/actions')))).not.toContain('private-password')
+})

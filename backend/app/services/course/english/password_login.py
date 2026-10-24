@@ -125,7 +125,9 @@ class PasswordLogins:
                     if not isinstance(image, str) or len(image) > 1_500_000:
                         raise PlatformError('登录验证画面过大，请重新登录')
                     job['public'] = {'login_id': lid, 'status': 'verification', 'image': image,
-                                     'message': result.get('message', '请完成平台登录验证')}
+                                     'message': result.get('message', '请完成平台登录验证'),
+                                     'image_type': 'png' if result.get('image_type') == 'png' else 'jpeg',
+                                     'view_state': 'blank' if result.get('view_state') == 'blank' else 'ready'}
                 else:
                     raise PlatformError('登录页面返回异常，请重新登录')
                 return dict(job['public'])

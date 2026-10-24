@@ -148,3 +148,13 @@ def test_login_api_owner_auth_no_cache_and_validation_never_echoes_password(monk
         assert 'private-' not in response.text
     response = client.post('/logins/not-a-login/actions', json={'action': 'text', 'text': 'private-' * 200})
     assert response.status_code == 422 and 'private-' not in response.text
+
+
+def test_reload_stays_on_platform_and_uses_get_instead_of_replaying_post():
+    page = Mock(url='https://sso.sflep.com/login')
+    operate(page, {'action': 'reload', 'platform': 'welearn'})
+    page.goto.assert_called_once_with(page.url, wait_until='domcontentloaded')
+    page.reload.assert_not_called()
+    page.url = 'https://untrusted.example/'
+    with pytest.raises(PlatformError):
+        operate(page, {'action': 'reload', 'platform': 'welearn'})

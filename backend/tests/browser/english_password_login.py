@@ -7,7 +7,8 @@ import unittest
 from unittest.mock import patch
 
 from playwright.sync_api import sync_playwright as real_playwright
-from app.services.course.english.login_browser import login_browser
+from app.services.course.english.login_browser import login_browser, operate
+from app.services.course.english.login_view import blank_png, login_picture
 
 
 class BrowserLoginTest(unittest.TestCase):
@@ -66,6 +67,47 @@ class BrowserLoginTest(unittest.TestCase):
             self.assertNotIn('fixture-password', json.dumps(reply))
         self.assertIn('fixture-cookie', replies[-1]['credential'])
         return replies
+
+    def test_blank_capture_is_suppressed_and_explicit_reload_recovers(self):
+        with real_playwright() as p:
+            browser = p.chromium.launch(headless=True, chromium_sandbox=True)
+            try:
+                context = browser.new_context(viewport={'width': 1000, 'height': 760})
+                body = {'value': '<html><body style="background:white"></body></html>'}
+                context.route('**/*', lambda route: route.fulfill(content_type='text/html', body=body['value']))
+                page = context.new_page()
+                page.goto('https://sso.sflep.com/idsvr/login.html')
+                self.assertTrue(blank_png(page.screenshot()))
+                chosen, picture = login_picture(context, page, 'welearn')
+                self.assertIs(chosen, page)
+                self.assertIsNone(picture)
+                body['value'] = '<html><body><h1>Login</h1><input name="username"></body></html>'
+                operate(page, {'action': 'reload', 'platform': 'welearn'})
+                chosen, picture = login_picture(context, page, 'welearn')
+                self.assertIs(chosen, page)
+                self.assertFalse(blank_png(picture))
+            finally:
+                browser.close()
+
+    def test_blank_popup_does_not_replace_rendered_login_tab(self):
+        with real_playwright() as p:
+            browser = p.chromium.launch(headless=True, chromium_sandbox=True)
+            try:
+                context = browser.new_context(viewport={'width': 1000, 'height': 760})
+                context.route('**/*', lambda route: route.fulfill(content_type='text/html',
+                    body='<h1>Login</h1><input>' if '/login' in route.request.url else '<html><body></body></html>'))
+                page = context.new_page()
+                page.goto('https://sso.sflep.com/login')
+                popup = context.new_page()
+                popup.goto('https://sso.sflep.com/redirect')
+                chosen, picture = login_picture(context, popup, 'welearn')
+                self.assertIs(chosen, page)
+                self.assertFalse(blank_png(picture))
+                popup.set_content('<h1>Verification</h1>')
+                chosen, _ = login_picture(context, page, 'welearn')
+                self.assertIs(chosen, popup)
+            finally:
+                browser.close()
 
     def test_password_without_verification_connects_directly(self):
         self.assertEqual(len(self.run_flow('welearn')), 1)

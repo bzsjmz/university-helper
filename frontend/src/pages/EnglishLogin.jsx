@@ -151,7 +151,13 @@ export default function EnglishLogin({ onConnected }) {
     </>}
     {login && <div className="space-y-3" aria-label="平台登录验证">
       <p>{login.message || '正在读取平台登录状态…'}</p>
-      {login.image && <>
+      <div className="flex flex-wrap gap-2">
+        <button className={button} disabled={busy} onClick={() => act({ action: 'refresh' })}>刷新画面</button>
+        <button className={button} disabled={busy} onClick={() => act({ action: 'reload' })}>重新加载页面</button>
+        <button className={button} disabled={busy} onClick={() => act({ action: 'top' })}>回到页面顶部</button>
+      </div>
+      {login.view_state === 'blank' && <p role="status" className="rounded-lg border border-border p-4">登录页面尚未显示内容，请稍候或重新加载页面。</p>}
+      {login.image && login.view_state !== 'blank' && <>
         <p className="text-sm text-text-muted">下面是平台的登录页面。可以直接点选、拖动；需要填写验证码时，先点选画面中的输入框，再在下方输入文字。</p>
         <button type="button" className="block w-full border border-border p-0" aria-label="平台验证页面"
           style={{ touchAction: 'none' }} disabled={busy}
@@ -165,7 +171,7 @@ export default function EnglishLogin({ onConnected }) {
             }
           }}
           onClick={(event) => { if (!dragged.current && event.detail > 0) act({ action: 'click', ...position(event) }) }}>
-          <img className="block h-auto w-full" src={`data:image/jpeg;base64,${login.image}`} alt="平台登录及验证码画面" draggable={false} width="1000" height="760" />
+          <img className="block h-auto w-full" src={`data:image/${login.image_type === 'png' ? 'png' : 'jpeg'};base64,${login.image}`} alt="平台登录及验证码画面" draggable={false} width="1000" height="760" />
         </button>
         <form className="flex flex-wrap gap-2" onSubmit={(event) => {
           event.preventDefault(); const value = text; setText(''); act({ action: 'text', text: value })

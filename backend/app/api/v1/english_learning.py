@@ -36,7 +36,7 @@ class PasswordLoginRequest(BaseModel):
 
 
 class LoginActionRequest(BaseModel):
-    action: Literal['click', 'drag', 'text', 'key', 'refresh', 'scroll']
+    action: Literal['click', 'drag', 'text', 'key', 'refresh', 'scroll', 'reload', 'top']
     x: int = Field(default=0, ge=0, lt=1000, strict=True)
     y: int = Field(default=0, ge=0, lt=760, strict=True)
     end_x: int = Field(default=0, ge=0, lt=1000, strict=True)

@@ -10,6 +10,7 @@ import time
 from urllib.parse import urlsplit
 
 from .clients import PlatformError, Welearn, course_url, storage_state
+from .login_view import login_picture
 
 LOGIN_URLS = {
     'welearn': 'https://welearn.sflep.com/user/prelogin.aspx?loginret=https%3A%2F%2Fwelearn.sflep.com%2Fstudent%2Findex.aspx',
@@ -112,6 +113,13 @@ def operate(page, command):
         if type(delta) is not int or not -600 <= delta <= 600:
             raise PlatformError('滚动距离无效')
         page.mouse.wheel(0, delta)
+    elif action == 'reload':
+        # GET the current official URL; never replay a password form POST.
+        if not allowed_url(page.url, command.get('platform', 'welearn')):
+            raise PlatformError('登录页面地址异常，请取消后重新登录')
+        page.goto(page.url, wait_until='domcontentloaded')
+    elif action == 'top':
+        page.evaluate('window.scrollTo(0, 0)')
     elif action != 'refresh':
         raise PlatformError('操作无效')
 
@@ -151,12 +159,9 @@ def login_browser(request):
                 # taking its picture. Retry only reads, never the user's action.
                 for attempt in range(3):
                     try:
-                        candidates = [p for p in context.pages if not p.is_closed() and allowed_url(p.url, platform)]
-                        if candidates:
-                            page = candidates[-1]
+                        page, picture = login_picture(context, page, platform)
                         result = authenticated_result(context, page, platform)
-                        image = None if result is not None else base64.b64encode(
-                            page.screenshot(type='jpeg', quality=70, timeout=5000)).decode()
+                        image = base64.b64encode(picture).decode() if picture and result is None else ''
                         break
                     except Error:
                         if attempt == 2:
@@ -168,12 +173,16 @@ def login_browser(request):
                 message = '请在下方官网画面中完成验证码或协议确认，再点击画面中的登录按钮。'
                 if platform == 'unipus' and urlsplit(page.url).hostname == 'u.unipus.cn':
                     message = '请在下方官网画面中点选课程，系统会自动读取课程目录。'
+                if not image:
+                    message = '平台登录页面暂时空白，正在等待加载。可点击“重新加载页面”，或取消后重试登录。'
                 print(json.dumps({'ok': True, 'status': 'verification', 'image': image,
+                                  'image_type': 'png', 'view_state': 'ready' if image else 'blank',
                                   'message': message}), flush=True)
                 raw = sys.stdin.buffer.readline(4097)
                 if not raw or len(raw) > 4096:
                     return
                 command = json.loads(raw)
+                command['platform'] = platform
                 operate(page, command)
                 page.wait_for_timeout(500)
         finally:
