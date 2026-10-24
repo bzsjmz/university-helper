@@ -2,12 +2,17 @@
 # Build/review separately; do not replace running services automatically.
 FROM ghcr.io/sweetcornna/university-helper-app:1.5.0
 USER root
+ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/university-helper-browsers
 COPY backend/requirements-english.txt /tmp/requirements-english.txt
-RUN PIP_NO_INDEX=0 python -m pip install --no-cache-dir -r /tmp/requirements-english.txt \
-    && python -m playwright install --with-deps chromium \
+RUN PIP_NO_INDEX=0 python -m pip install --no-cache-dir --index-url "${PIP_INDEX_URL}" -r /tmp/requirements-english.txt \
+    && rm /tmp/requirements-english.txt
+# Match the project server build's mirror selection, inside this image only.
+RUN if [ -f /etc/apt/sources.list.d/debian.sources ] && echo "${PIP_INDEX_URL}" | grep -q tsinghua; then \
+        sed -i 's|http://deb.debian.org/debian|https://mirrors.tuna.tsinghua.edu.cn/debian|g; s|http://security.debian.org/debian-security|https://mirrors.tuna.tsinghua.edu.cn/debian-security|g' /etc/apt/sources.list.d/debian.sources; \
+    fi \
+    && python -m playwright install --with-deps --only-shell chromium \
     && chmod -R a+rX /opt/university-helper-browsers \
-    && rm /tmp/requirements-english.txt \
     && rm -rf /var/lib/apt/lists/*
 COPY --chown=app:app backend/app /srv/backend/app
 USER app

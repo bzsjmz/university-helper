@@ -2,7 +2,7 @@
 
 入口：导航「英语平台试用」，路径 `/english-learning`。接口位于
 `/api/v1/english-learning`，沿用当前管理用户认证并隔离会话/任务。
-当前代码只通过离线合成页面和模拟请求验证；尚未通过真实课程验证，也未上线。
+已通过离线合成页面、模拟请求和实际 Chromium 沙箱/表单保存验证；尚未通过真实课程验证。
 
 ## 自动答题与作业
 
@@ -75,18 +75,22 @@ Cookie；勿粘贴其他站点信息。
 ## 浏览器运行环境与上线
 
 两平台自动答题及老版 U校园目录/阅读均需要 Playwright 和 Chromium。WE Learn 的
-原课程读取/时长模式只需要 requests。当前运行基础镜像尚不含浏览器。
+原课程读取/时长模式只需要 requests。原始上游 app 基础镜像不含浏览器。
 
-可选 `Dockerfile.english` 固定 Playwright 1.63.0，在镜像内安装浏览器和系统依赖，
-以原 app 用户运行，保留 `chromium_sandbox=True`。该镜像尚未构建/验证。
-不得为启动浏览器关闭 sandbox、扩大业务权限或自行提高资源限额。
+可选 `Dockerfile.english` 固定 Playwright 1.63.0，在镜像内安装官方 Chromium
+headless shell 和系统依赖，以原 app 用户运行，保留 `chromium_sandbox=True`。
+已在禁网、只读根文件系统、UID 10001、cap-drop ALL、no-new-privileges、
+512MiB/0.75CPU/192 pids 的容器内验证真实浏览器填写及原生保存回执。
+默认 Docker seccomp 在移除全部能力后会拦截沙箱初始化；运行环境需要审核
+用户命名空间创建、沙箱内 chroot 及 PID 命名空间 clone 的受限规则。
+不得关闭 sandbox、添加宿主能力、使用 seccomp unconfined 或自行提高资源限额。
 构建/namespace 与 sandbox 要求参考 <https://playwright.dev/python/docs/docker>。
 
 构建示例（不代表部署授权）：源码目录执行
 `docker build -f Dockerfile.english -t university-helper-app-english:trial .`。
 专用 dockerignore 只开放后端源码和浏览器依赖清单，排除 runtime/secrets/data/profile。
-发布前须在隔离环境验证 sandbox、当前 app 200 pids/1GiB 预算与真实课程结构，
-核对活动任务并另获上线授权；代码提交/模拟测试通过不等于功能已上线可用。
+每个部署环境仍须验证 sandbox 和现有资源预算，核对活动任务并取得上线授权。
+合成页面通过不保证真实课程结构兼容；源码与镜像构建成功不代表已部署。
 浏览器只允许平台域名的 HTTPS 资源，不授权摄像头/麦克风、不共享 profile 或 Docker
 socket；依赖其他 CDN/第三方域名的课程可能无法打开，须明确核对后另做受限适配。
 
