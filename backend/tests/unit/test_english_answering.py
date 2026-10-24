@@ -89,6 +89,7 @@ def fake_page(monkeypatch, *, missing=False, unsupported=0, submit=True, receipt
     monkeypatch.setattr(forms, 'fill_question', Mock(return_value=True))
     monkeypatch.setattr(forms, 'verify_question', Mock(return_value=True))
     action = Mock()
+    frame.locator.return_value.filter.return_value.count.return_value = 0
     monkeypatch.setattr(forms, 'button', lambda f, names: action)
     frame.evaluate.side_effect = ['', receipt]
     page = Mock(frames=[frame])
@@ -132,6 +133,7 @@ def test_post_fill_recheck_failure_prevents_submit(monkeypatch):
     monkeypatch.setattr(forms, 'fill_question', Mock(return_value=True))
     monkeypatch.setattr(forms, 'verify_question', Mock(return_value=False))
     action = Mock()
+    frame.locator.return_value.filter.return_value.count.return_value = 0
     monkeypatch.setattr(forms, 'button', lambda f, names: action)
     result = original(Mock(frames=[frame]), lambda q: {'answer': [0]}, submit=True)
     assert result['status'] == 'needs_manual'

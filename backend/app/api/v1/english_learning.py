@@ -30,7 +30,7 @@ router = APIRouter(route_class=PrivateRoute)
 
 
 class PasswordLoginRequest(BaseModel):
-    platform: Literal['welearn', 'unipus']
+    platform: Literal['welearn', 'unipus_ai']
     username: SecretStr = Field(min_length=1, max_length=256)
     password: SecretStr = Field(min_length=1, max_length=256)
 
@@ -47,7 +47,7 @@ class LoginActionRequest(BaseModel):
 
 
 class ConnectRequest(BaseModel):
-    platform: Literal['welearn', 'unipus']
+    platform: Literal['welearn', 'unipus_ai']
     credential: SecretStr = Field(min_length=1, max_length=100000)
     course_url: str = Field(default='', max_length=4096)
 
@@ -58,6 +58,7 @@ class ItemsRequest(BaseModel):
 
 class StartRequest(ItemsRequest):
     item: str = Field(min_length=1, max_length=256)
+    end_item: str = Field(default='', max_length=256)
     mode: Literal['study', 'answer'] = 'study'
     submit: StrictBool = False
     allow_ai: StrictBool = False
@@ -126,7 +127,7 @@ async def items(sid: str, request: ItemsRequest, owner=Depends(get_current_user_
 @router.post('/sessions/{sid}/tasks')
 async def start(sid: str, request: StartRequest, owner=Depends(get_current_user_id)):
     return await call(english_manager.start, owner, sid, request.course, request.item, request.seconds,
-                      request.mode, request.submit, request.allow_ai)
+                      request.mode, request.submit, request.allow_ai, request.end_item)
 
 
 @router.delete('/sessions/{sid}')

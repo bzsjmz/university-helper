@@ -129,7 +129,7 @@ export default function EnglishLogin({ onConnected }) {
       <label className="block">平台
         <select className={field} value={platform} disabled={busy} onChange={(e) => {
           setPlatform(e.target.value); setPassword(''); setCredential(''); setUrl(''); setMessage('')
-        }}><option value="welearn">WE Learn</option><option value="unipus">老版 U校园</option></select>
+        }}><option value="welearn">WE Learn</option><option value="unipus_ai">U校园 AI版</option></select>
       </label>
       <form className="space-y-4" onSubmit={loginWithPassword}>
         <label className="block">账号
@@ -158,9 +158,6 @@ export default function EnglishLogin({ onConnected }) {
           } catch (error) { if (alive.current) setMessage(error.message) }
           finally { if (alive.current) setBusy(false) }
         }}>
-          {platform === 'unipus' && <label className="block">课程目录网址
-            <input className={field} type="url" value={url} onChange={(e) => setUrl(e.target.value)} required disabled={busy} />
-          </label>}
           <label className="block">{platform === 'welearn' ? 'Cookie' : 'Storage state JSON'}
             <textarea className={field} rows={4} value={credential} onChange={(e) => setCredential(e.target.value)}
               required maxLength={100000} disabled={busy} autoComplete="off" spellCheck={false} />

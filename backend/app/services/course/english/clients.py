@@ -1,7 +1,7 @@
 """Platform clients. No credentials, question text or remote errors are logged.
 
 WE Learn time protocol adapted from xuebi0218/welearn-gui (MulanPSL-2.0).
-U-campus catalogue selectors adapted from hyhang915/AutoUnipus-plus (BSD-3-Clause).
+U-campus AI uses official authenticated browser requests and visible course controls.
 See docs/english-learning.md and third_party/english-learning/ for provenance.
 """
 import json
@@ -18,14 +18,8 @@ class PlatformError(Exception):
 
 
 def course_url(value):
-    parsed = urlsplit(value)
-    if (parsed.scheme != 'https' or parsed.hostname != 'u.unipus.cn'
-            or parsed.port not in (None, 443) or parsed.username or parsed.password
-            or parsed.path != '/user/student/mycourse/courseCatalog'):
-        raise PlatformError('请输入老版 U校园的 HTTPS 课程目录网址')
-    if not parsed.query or len(value) > 4096:
-        raise PlatformError('课程网址缺少参数或过长')
-    return value
+    from .uai import course_id
+    return course_id(value)
 
 
 def storage_state(raw):
@@ -44,7 +38,7 @@ def storage_state(raw):
         origins = []
         for origin in state.get('origins', []):
             parsed = urlsplit(origin['origin'])
-            if (parsed.scheme != 'https' or parsed.hostname not in ('u.unipus.cn', 'ucontent.unipus.cn')
+            if (parsed.scheme != 'https' or parsed.hostname not in ('uai.unipus.cn', 'ucontent.unipus.cn')
                     or parsed.port not in (None, 443) or parsed.username or parsed.password
                     or parsed.path or parsed.query or parsed.fragment):
                 raise ValueError()
@@ -179,29 +173,10 @@ class Welearn:
         return {'status': 'finished', 'message': '限时会话已结束，请在官网核对累计时长；未修改分数或完成状态'}
 
 
-# Only reading/preview entries are offered. Exercise/test icons are excluded.
-UNIPUS_ITEMS_JS = r"""() => {
-  const results = []; const seen = new Set();
-  for (const mark of document.querySelectorAll('.icon-bixiu')) {
-    let row = mark.parentElement;
-    for (let n = 0; n < 8 && row; n++, row = row.parentElement) {
-      if (row.querySelectorAll('.iconfont').length >= 2) break;
-    }
-    if (!row || seen.has(row)) continue;
-    seen.add(row);
-    for (const icon of row.querySelectorAll('.icon-yulan, .icon-wenben, .icon-lianxi')) {
-      if (!icon.getClientRects().length) continue;
-      const id = String(results.length);
-      icon.setAttribute('data-uh-reading', id);
-      results.push({id, name: (row.innerText || '').trim().slice(0,240) + (icon.classList.contains('icon-lianxi') ? ' · 练习/作业' : ' · 阅读'), progress: ''});
-    }
-  }
-  return results;
-}"""
-
-
 @contextmanager
-def unipus_browser(credential, platform='unipus'):
+def unipus_browser(credential, platform='unipus_ai'):
+    if platform not in ('welearn', 'unipus_ai'):
+        raise PlatformError('该平台已移除')
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
@@ -222,6 +197,11 @@ def unipus_browser(credential, platform='unipus'):
             context = browser.new_context(storage_state=state, accept_downloads=False,
                                           service_workers='block')
             def guard(route):
+                if platform == 'unipus_ai':
+                    from .uai import decorative_portal_resource
+                    if decorative_portal_resource(route.request):
+                        route.abort()
+                        return
                 parsed = urlsplit(route.request.url)
                 host = parsed.hostname or ''
                 if (parsed.scheme == 'https' and (host == domain or host.endswith('.' + domain))
@@ -239,31 +219,8 @@ def unipus_browser(credential, platform='unipus'):
 
 
 def unipus(credential, url, *, item=None, seconds=0, expected_name=None, solve=None, submit=False):
-    url = course_url(url)
-    with unipus_browser(credential) as (context, page):
-        page.goto(url, wait_until='domcontentloaded')
-        page.wait_for_selector('.icon-bixiu')
-        items = page.evaluate(UNIPUS_ITEMS_JS)
-        if item is None:
-            return {'courses': [{'id': url, 'name': (page.title() or 'U校园课程')[:256]}], 'items': items}
-        selected = next((i for i in items if i['id'] == item), None)
-        if not selected or selected['name'] != expected_name:
-            raise PlatformError('课程目录已变化，请刷新后重新选择内容')
-        before = list(context.pages)
-        page.locator(f'[data-uh-reading="{item}"]').click()
-        page.wait_for_timeout(1500)
-        opened = [p for p in context.pages if p not in before]
-        target = opened[-1] if opened else page
-        target.wait_for_load_state('domcontentloaded')
-        if solve is not None:
-            from .forms import answer_page
-            return answer_page(target, solve, submit=submit, deadline=time.monotonic() + seconds)
-        for frame in target.frames:
-            if frame.locator('input:not([type=hidden]), textarea, select').count():
-                return {'status': 'needs_manual', 'message': '该内容含交互题目，请在官网人工处理；未提交答案'}
-        # Real page stays open; no synthetic score/time/completion requests.
-        target.wait_for_timeout(seconds * 1000)
-        return {'status': 'finished', 'message': '阅读页面停留已结束，实际进度和时长以官网为准'}
+    from .uai import run
+    return run(credential, url, item=item, seconds=seconds, expected_name=expected_name, solve=solve, submit=submit)
 
 
 def welearn_answer(credential, cid, item, seconds, solve, submit=False):
@@ -272,8 +229,11 @@ def welearn_answer(credential, cid, item, seconds, solve, submit=False):
         identity, items = client.items(cid)
     finally:
         client.session.close()
-    if item not in {i['id'] for i in items}:
+    selected = next((i for i in items if i['id'] == item), None)
+    if selected is None:
         raise PlatformError('该小节不属于所选课程或尚未开放')
+    if str(selected.get('progress', '')).lower() in ('1', 'true', 'completed', 'passed'):
+        return {'status': 'finished', 'message': '平台已标记该课节完成，已跳过', 'counts': {'skipped': 1}}
     url = Welearn.BASE + '/student/StudyCourse.aspx?' + urlencode({**identity, 'sco': item})
     with unipus_browser(credential, platform='welearn') as (context, page):
         from .native_answers import NativeAnswers

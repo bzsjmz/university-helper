@@ -26,6 +26,8 @@ class PasswordLogins:
         return self._start(owner, 'welearn', {'method': 'wechat'})
 
     def _start(self, owner, platform, login_request):
+        if platform not in ('welearn', 'unipus_ai'):
+            raise PlatformError('老版 U校园已移除，请选择 U校园 AI版')
         self.cleanup()
         with self.lock, self.manager.lock:
             if self.manager.closing:

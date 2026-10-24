@@ -8,7 +8,7 @@ from unittest.mock import Mock
 import pytest
 
 from app.services.course.english.clients import PlatformError
-from app.services.course.english.login_browser import allowed_url, courses_from_links, operate
+from app.services.course.english.login_browser import allowed_url, operate
 from app.services.course.english.manager import EnglishManager
 
 
@@ -103,14 +103,12 @@ def test_login_navigation_rejects_other_origins(url):
     assert not allowed_url(url, 'welearn')
 
 
-def test_course_discovery_only_accepts_legacy_catalogues_without_manual_url():
-    url = 'https://u.unipus.cn/user/student/mycourse/courseCatalog?courseId=1'
-    result = courses_from_links([{'href': 'https://evil.test/', 'name': 'bad'},
-        {'href': url, 'name': 'My English'}, {'href': url, 'name': 'duplicate'},
-        {'href': url.replace('courseCatalog', 'exam'), 'name': 'exam'}])
-    assert result == [{'id': url, 'name': 'My English'}]
-    assert allowed_url('https://sso.sflep.com/idsvr/login.html', 'welearn')
-    assert allowed_url('https://sso.unipus.cn/sso/login', 'unipus')
+def test_ai_course_identifiers_reject_legacy_catalogue_urls():
+    from app.services.course.english.uai import course_id
+    assert course_id('ai-course-1') == 'ai-course-1'
+    with pytest.raises(PlatformError):
+        course_id('https://u.unipus.cn/user/student/mycourse/courseCatalog?courseId=1')
+    assert allowed_url('https://sso.unipus.cn/sso/login', 'unipus_ai')
 
 
 def test_manual_verification_cannot_execute_script_or_navigate_arbitrary_url():
@@ -134,14 +132,14 @@ def test_login_api_owner_auth_no_cache_and_validation_never_echoes_password(monk
     app = FastAPI()
     app.include_router(routes.router)
     client = TestClient(app)
-    body = {'platform': 'unipus', 'username': 'user', 'password': 'private-password'}
+    body = {'platform': 'unipus_ai', 'username': 'user', 'password': 'private-password'}
     assert client.post('/logins', json=body).status_code == 401
     app.dependency_overrides[get_current_user_id] = lambda: 'alice'
     monkeypatch.setattr(routes.english_manager.logins, 'start', Mock(return_value={'status': 'verification'}))
     response = client.post('/logins', json=body)
     assert response.status_code == 200 and response.headers['cache-control'] == 'no-store'
-    routes.english_manager.logins.start.assert_called_once_with('alice', 'unipus', 'user', 'private-password')
-    for invalid in ({'password': {'value': 'private-password'}}, {'password': 'private-' * 200},
+    routes.english_manager.logins.start.assert_called_once_with('alice', 'unipus_ai', 'user', 'private-password')
+    for invalid in ({'platform': 'unipus'}, {'password': {'value': 'private-password'}}, {'password': 'private-' * 200},
                     {'platform': 'private-platform'}):
         response = client.post('/logins', json={**body, **invalid})
         assert response.status_code == 422
@@ -184,7 +182,7 @@ def test_wechat_hosts_are_exact_scoped_and_cannot_be_exported_as_platform_creden
     assert allowed_login_url(url, 'welearn', 'wechat')
     assert not allowed_url(url, 'welearn')
     assert not allowed_login_url(url, 'welearn', 'password')
-    assert not allowed_login_url(url, 'unipus', 'wechat')
+    assert not allowed_login_url(url, 'unipus_ai', 'wechat')
     for host in ('res.wx.qq.com', 'lp.open.weixin.qq.com'):
         req = Mock(url='https://' + host + '/asset', method='GET')
         req.is_navigation_request.return_value = False

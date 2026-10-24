@@ -164,7 +164,7 @@ def test_api_authentication_and_owner_forwarding(monkeypatch):
     routes.english_manager.list.assert_called_once_with('alice')
     monkeypatch.setattr(routes.english_manager, 'start', Mock(return_value={'id': 'task'}))
     assert client.post('/sessions/s/tasks', json={'course': 'c', 'item': 'i', 'seconds': 60}).status_code == 200
-    routes.english_manager.start.assert_called_once_with('alice', 's', 'c', 'i', 60, 'study', False, False)
+    routes.english_manager.start.assert_called_once_with('alice', 's', 'c', 'i', 60, 'study', False, False, '')
     for seconds in (0, 1801, True, 30.5, '60'):
         assert client.post('/sessions/s/tasks', json={'course': 'c', 'item': 'i', 'seconds': seconds}).status_code == 422
 
@@ -211,3 +211,107 @@ def test_public_counts_snapshot_is_detached_from_worker_updates():
     task['counts']['answered'] = 2
     task['counts']['missing'] = 1
     assert public['counts'] == {'answered': 1}
+
+
+def test_range_executes_in_catalog_order_and_aggregates_manual_results(manager):
+    import time
+    sid = manager.connect('alice', 'welearn', 'sid=private')['session_id']
+    manager.sessions[sid]['items']['c'] = [{'id': str(i), 'name': f'Lesson {i}'} for i in range(4)]
+    requests = []
+    def execute(request, task=None):
+        requests.append(request)
+        return {'status': 'needs_manual' if request['item'] == '1' else 'finished',
+                'message': 'done', 'counts': {'questions': 2, 'filled': 2}}
+    manager.execute = execute
+    task = manager.start('alice', sid, 'c', '1', 60, mode='answer', end_item='3')
+    for _ in range(200):
+        if not manager.sessions[sid]['busy']: break
+        time.sleep(.005)
+    result = manager.list('alice')[0]
+    assert [r['item'] for r in requests] == ['1', '2', '3']
+    assert all(r['seconds'] == 60 for r in requests)
+    assert result['total_items'] == result['completed_items'] == 3
+    assert result['status'] == 'needs_manual'
+    assert result['counts'] == {'questions': 6, 'filled': 6}
+    with pytest.raises(PlatformError): manager.start('alice', sid, 'c', '3', 60, end_item='1')
+    with pytest.raises(PlatformError): manager.start('alice', sid, 'c', '0', 60, end_item='other')
+    assert 'private' not in json.dumps(result)
+
+
+def test_uai_courses_use_existing_browser_jwt_only_on_fixed_official_origin():
+    from app.services.course.english.uai import courses, COURSES
+    response = Mock(status=200)
+    response.body.return_value = json.dumps({'code': 1, 'value': {'courseList': [
+        {'name': 'Group', 'courseResourceList': [{'instanceId': 'ai-1', 'name': 'AI English'},
+                                                {'instanceId': 'ai-1', 'name': 'duplicate'}]}]}}).encode()
+    context = Mock()
+    context.cookies.return_value = [{'name': 'jwt', 'value': 'private-jwt'}]
+    context.request.get.return_value = response
+    assert courses(context) == [{'id': 'ai-1', 'name': 'AI English'}]
+    context.request.get.assert_called_once_with(COURSES, headers={'Authorization': 'private-jwt', 'u-app-id': '39', 'u-platform': '2',
+            'Referer': 'https://uai.unipus.cn/', 'Origin': 'https://uai.unipus.cn'}, timeout=15000, max_redirects=0)
+    response.dispose.assert_called_once()
+    context.cookies.return_value = []
+    assert courses(context) == []
+    assert context.request.get.call_count == 1
+
+
+def test_removed_legacy_platform_is_rejected_even_outside_api(manager):
+    with pytest.raises(PlatformError):
+        manager.connect('alice', 'unipus', STATE)
+    with pytest.raises(PlatformError):
+        manager.logins.start('alice', 'unipus', 'u', 'p')
+
+
+def test_stopping_range_does_not_start_next_lesson(manager):
+    import time
+    sid = manager.connect('alice', 'welearn', 'sid=private')['session_id']
+    manager.sessions[sid]['items']['c'] = [{'id': str(i), 'name': str(i)} for i in range(2)]
+    entered, released = threading.Event(), threading.Event()
+    visited = []
+    def execute(request, task=None):
+        visited.append(request['item'])
+        entered.set()
+        assert released.wait(2)
+        return {'status': 'finished', 'counts': {}}
+    manager.execute = execute
+    task = manager.start('alice', sid, 'c', '0', 30, end_item='1')
+    assert entered.wait(2)
+    manager.stop('alice', task['id'])
+    released.set()
+    for _ in range(200):
+        if not manager.sessions[sid]['busy']: break
+        time.sleep(.005)
+    assert visited == ['0']
+    assert manager.list('alice')[0]['status'] == 'cancelled'
+
+
+def test_ai_storage_state_accepts_only_ai_and_content_local_storage():
+    state = json.loads(STATE)
+    state['origins'] = [{'origin': 'https://uai.unipus.cn', 'localStorage': [{'name':'jwt','value':'private-jwt'}]}]
+    assert storage_state(json.dumps(state))['origins'] == state['origins']
+    state['origins'][0]['origin'] = 'https://u.unipus.cn'
+    with pytest.raises(PlatformError): storage_state(json.dumps(state))
+
+
+def test_welearn_completed_leaf_is_skipped_without_opening_browser(monkeypatch):
+    client = Mock()
+    client.items.return_value = ({}, [{'id':'item','progress':'true'}])
+    monkeypatch.setattr(clients, 'Welearn', lambda credential: client)
+    browser = Mock(side_effect=AssertionError('No browser for completed lesson'))
+    monkeypatch.setattr(clients, 'unipus_browser', browser)
+    result = clients.welearn_answer('sid=private', 'course', 'item', 30, Mock())
+    assert result['status'] == 'finished' and result['counts']['skipped'] == 1
+
+
+def test_portal_light_loading_keeps_authentication_and_course_media():
+    from app.services.course.english.uai import decorative_portal_resource
+    request = Mock(resource_type='image', frame=Mock(url='https://uai.unipus.cn/'))
+    assert decorative_portal_resource(request)
+    request.frame.url = 'https://sso.unipus.cn/sso/login'
+    assert not decorative_portal_resource(request)
+    request.frame.url = 'https://ucontent.unipus.cn/_explorationpc_default/pc.html'
+    assert not decorative_portal_resource(request)
+    request.frame.url = 'https://uai.unipus.cn/'
+    request.resource_type = 'script'
+    assert not decorative_portal_resource(request)

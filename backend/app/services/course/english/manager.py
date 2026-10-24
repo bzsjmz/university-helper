@@ -45,6 +45,8 @@ class EnglishManager:
         result = {key: task[key] for key in ('id', 'platform', 'course_name', 'item_name',
                 'seconds', 'status', 'message', 'started_at', 'mode', 'submit', 'allow_ai')}
         result['counts'] = dict(task.get('counts', {}))
+        result.update(total_items=task.get('total_items', 1), completed_items=task.get('completed_items', 0),
+                      current_item=task.get('current_item', task['item_name']), results=list(task.get('results', [])))
         return result
 
     @staticmethod
@@ -153,9 +155,12 @@ class EnglishManager:
             solver.close()
 
     def connect(self, owner, platform, credential, course=''):
+        if platform not in ('welearn', 'unipus_ai'):
+            raise PlatformError('老版 U校园已移除，请选择 U校园 AI版')
         self.cleanup()
-        if platform == 'unipus':
-            course_url(course)
+        if platform == 'unipus_ai':
+            if course:
+                course_url(course)
             storage_state(credential)
         with self.lock:
             if sum(s['owner'] == owner for s in self.sessions.values()) >= 10:
@@ -167,14 +172,14 @@ class EnglishManager:
     def adopt_login(self, owner, platform, result, course=''):
         credential = result['credential']
         courses = result['courses']
-        if platform == 'unipus':
+        if platform == 'unipus_ai':
             storage_state(credential)
             for entry in courses:
                 course_url(entry['id'])
         sid = uuid4().hex
         session = {'owner': owner, 'platform': platform, 'credential': encrypt_str(credential),
                    'courses': courses, 'items': {}, 'created': time.monotonic(), 'busy': False}
-        if platform == 'unipus' and course and 'items' in result:
+        if platform == 'unipus_ai' and course and 'items' in result:
             session['items'][course] = result['items']
         with self.lock:
             if self.closing or sum(s['owner'] == owner for s in self.sessions.values()) >= 10:
@@ -207,17 +212,25 @@ class EnglishManager:
             with self.lock:
                 session['busy'] = False
 
-    def start(self, owner, sid, course, item, seconds, mode='study', submit=False, allow_ai=False):
+    def start(self, owner, sid, course, item, seconds, mode='study', submit=False, allow_ai=False, end_item=''):
         with self.lock:
             session = self.session(owner, sid)
             if session['busy']:
                 raise PlatformError('该会话已有操作正在执行')
-            selected = next((i for i in session['items'].get(course, []) if i['id'] == item), None)
-            if selected is None:
+            catalog = session['items'].get(course, [])
+            ids = [i['id'] for i in catalog]
+            end_item = end_item or item
+            if item not in ids or end_item not in ids or len(ids) != len(set(ids)):
                 raise PlatformError('请先读取并选择课程内容')
+            first, last = ids.index(item), ids.index(end_item)
+            if first > last:
+                raise PlatformError('范围终点必须在起点之后')
+            selected_items = [dict(i) for i in catalog[first:last + 1]]
+            selected = selected_items[0]
             task = {'id': uuid4().hex, 'owner': owner, 'platform': session['platform'],
                     'course_name': next(c['name'] for c in session['courses'] if c['id'] == course),
-                    'item_name': selected['name'], 'seconds': seconds, 'status': 'running',
+                    'item_name': selected['name'] if first == last else selected['name'] + ' → ' + selected_items[-1]['name'],
+                    'total_items': len(selected_items), 'completed_items': 0, 'current_item': selected['name'], 'results': [], 'seconds': seconds, 'status': 'running',
                     'message': '限时学习会话执行中', 'started_at': time.time(),
                     'updated': time.monotonic(), 'cancel': threading.Event(),
                     'mode': mode, 'submit': submit, 'allow_ai': allow_ai, 'counts': {}}
@@ -225,13 +238,30 @@ class EnglishManager:
             self.tasks[task['id']] = task
             def run():
                 try:
-                    result = self.execute({'platform': session['platform'], 'action': 'answer' if mode == 'answer' else 'study',
-                        'submit': submit, 'allow_ai': allow_ai,
-                        'credential': decrypt_str(session['credential']), 'course': course,
-                        'item': item, 'seconds': seconds, 'expected_name': selected['name']}, task)
+                    totals = {}
+                    needs_manual = False
+                    for selected in selected_items:
+                        if task['cancel'].is_set():
+                            break
+                        with self.lock:
+                            task.update(current_item=selected['name'], message='正在处理：' + selected['name'], counts=dict(totals))
+                        result = self.execute({'platform': session['platform'], 'action': 'answer' if mode == 'answer' else 'study',
+                            'submit': submit, 'allow_ai': allow_ai,
+                            'credential': decrypt_str(session['credential']), 'course': course,
+                            'item': selected['id'], 'seconds': seconds, 'expected_name': selected['name']}, task)
+                        for key, value in result.get('counts', {}).items():
+                            if type(value) is int and value >= 0:
+                                totals[key] = totals.get(key, 0) + value
+                        state = result.get('status', 'failed')
+                        needs_manual |= state != 'finished'
+                        with self.lock:
+                            task['results'].append({'name': selected['name'], 'status': state,
+                                                    'message': result.get('message', '操作未完成')})
+                            task.update(completed_items=len(task['results']), counts=dict(totals))
                     with self.lock:
-                        task.update(status=result.get('status', 'failed'), message=result.get('message', '操作未完成'),
-                                    counts=result.get('counts', {}))
+                        task.update(status='needs_manual' if needs_manual else 'finished',
+                            message=(task['results'][0]['message'] if len(selected_items) == 1 and task['results'] else
+                                     f"范围执行结束：{len(task['results'])}/{len(selected_items)} 节，" + ('部分内容需人工处理' if needs_manual else '请核对平台进度')))
                 except Exception as exc:
                     with self.lock:
                         task.update(status='failed', message=str(exc) if isinstance(exc, PlatformError) else '平台任务执行失败，请在官网核对保存/提交状态')

@@ -1,5 +1,6 @@
 """Real browser DOM/XML -> private solver -> native save, with no paid provider."""
 import json
+from contextlib import contextmanager
 import tempfile
 import unittest
 from pathlib import Path
@@ -13,7 +14,7 @@ from app.services.course.chaoxing.answer_cache import CacheDAO
 
 
 class NativeBrowserTest(unittest.TestCase):
-    def run_page(self, html, *, xml=None, iframe=False):
+    def run_page(self, html, *, xml=None, iframe=False, submit=False):
         with tempfile.TemporaryDirectory() as temporary, sync_playwright() as p:
             browser = p.chromium.launch(headless=True, chromium_sandbox=True)
             try:
@@ -45,14 +46,58 @@ class NativeBrowserTest(unittest.TestCase):
                         patch('app.services.course.english.answering.get_provider',
                               side_effect=AssertionError('Native hit must never initialize paid AI')):
                     solver = EnglishSolver('welearn', 'fixture', True)
-                    result = answer_page(page, solver.solve, native=native)
+                    result = answer_page(page, solver.solve, native=native, submit=submit)
                 self.assertEqual(result['status'], 'finished', result)
-                self.assertEqual(result['counts']['saved'], 1, result)
+                self.assertEqual(result['counts']['submitted' if submit else 'saved'], 1, result)
                 self.assertEqual(result['counts']['ai_answers'], 0, result)
-                self.assertEqual(result['counts']['submitted'], 0, result)
+                self.assertEqual(result['counts']['saved' if submit else 'submitted'], 0, result)
                 return result
             finally:
                 browser.close()
+
+    def test_welearn_dialogue_blanks_submit_with_native_confirmation_without_playing_video(self):
+        rows = ''.join(f'<p>Speaker {i}: Complete this sentence <span data-controltype="filling"><input data-itemtype="input"><span data-itemtype="result" hidden>word{i}</span></span> now.</p>' for i in range(5))
+        result = self.run_page('<html><body><video></video>' + rows +
+            '<div data-controltype="submit" onclick="document.querySelector(\'.cmd_submit\').style.display=\'block\'">Submit</div>'
+            '<button class="cmd_submit" style="display:none" onclick="document.body.setAttribute(\'data-submitted\',\'true\')">Submit</button>'
+            '</body></html>', submit=True)
+        self.assertEqual(result['counts']['questions'], 5)
+        self.assertEqual(result['counts']['native_answers'], 5)
+        self.assertEqual(result['counts']['filled'], 5)
+
+    def test_uai_course_card_catalog_and_native_save_in_browser(self):
+        from app.services.course.english import uai
+        @contextmanager
+        def browser_fixture(credential, platform):
+            self.assertEqual(platform, 'unipus_ai')
+            with sync_playwright() as p:
+                browser = p.chromium.launch(headless=True, chromium_sandbox=True)
+                try:
+                    context = browser.new_context()
+                    def route(r):
+                        if 'uai.unipus.cn' in r.request.url:
+                            body = '<button onclick="document.querySelector(\'a\').style.display=\'block\'">Class English</button><a style="display:none" href="https://ucontent.unipus.cn/_explorationpc_default/pc.html">AI English</a>'
+                        else:
+                            body = '<div data-group-id="leaf1" onclick="document.querySelector(\'.question\').hidden=false">Lesson 1</div><div class="question" hidden><h3 class="stem">Fill the word</h3><input type="text"></div><button onclick="document.querySelector(\'.result\').textContent=\'保存成功\'">保存</button><div class="result"></div>'
+                        r.fulfill(content_type='text/html; charset=utf-8', body=body)
+                    context.route('**/*', route)
+                    yield context, context.new_page()
+                finally: browser.close()
+        with patch('app.services.course.english.clients.unipus_browser', browser_fixture), \
+             patch('app.services.course.english.uai.courses', return_value=[{'id':'ai-1','name':'AI English','group_name':'Class English'}]):
+            catalog = uai.run('private-state', 'ai-1')['items']
+            self.assertEqual(catalog, [{'id':'0','name':'Lesson 1','progress':''}])
+            result = uai.run('private-state', 'ai-1', item='0', expected_name='Lesson 1', seconds=30,
+                             solve=lambda q: {'answer':['word'], 'source':'cache'})
+            self.assertEqual(result['status'], 'finished', result)
+            self.assertEqual(result['counts']['saved'], 1)
+
+    def test_welearn_custom_option_rows_use_native_answer_and_verify_selection(self):
+        result = self.run_page('''<html><body><div data-controltype="choice"><h3 class="stem">Pick blue</h3>
+          <ul data-itemtype="options"><li onclick="this.classList.add('selected')">red</li>
+          <li data-solution="true" onclick="this.classList.add('selected')">blue</li></ul></div>
+          <button onclick="document.querySelector('.result').textContent='保存成功'">保存</button><div class="result"></div></body></html>''')
+        self.assertEqual(result['counts']['native_answers'], 1)
 
     def test_dom_solutions_save_without_cache_or_ai(self):
         result = self.run_page('''<html><body>

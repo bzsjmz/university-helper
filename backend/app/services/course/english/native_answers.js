@@ -51,7 +51,8 @@ q => {
     const marked = [];
     for (const node of nodes) {
       const raw = node.getAttribute('data-solution');
-      if (raw === '' || raw === 'true') {
+      if (raw === '' || raw === 'true' || (controls.includes(node) && node.tagName === 'LI' &&
+          root.matches('[data-controltype="choice"]') && !['false','0'].includes(raw))) {
         const owned = controls.map((e,i) => e === node || node.contains(e) ||
           [...(e.labels || [])].some(label => label === node || label.contains(node)) ? i : -1).filter(i => i >= 0);
         if (owned.length === 1) marked.push(owned[0]);
@@ -72,6 +73,13 @@ q => {
     }
   } else {
     const answers = controls.map(e => decode(e.getAttribute('data-solution')));
+    // WE courseware binds a hidden result node to one filling widget. Never
+    // treat an unrelated page-wide result or a previous input value as an answer.
+    if (q.count === 1 && root.matches('[data-controltype="filling"], [data-controltype="fillinglong"]')) {
+      const results = [...root.querySelectorAll('[data-itemtype="result"]')]
+        .filter(e => e.closest('[data-controltype]') === root);
+      if (results.length === 1) add([decode(results[0].textContent)]);
+    }
     if (answers.every(v => v !== null)) add(answers);
     // A question-level scalar can identify one blank, never an ordered group.
     if (q.count === 1) for (const node of nodes) {

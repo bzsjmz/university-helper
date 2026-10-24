@@ -25,13 +25,13 @@ async function login(user, platform = 'welearn') {
   await user.click(screen.getByRole('button', { name: '登录并读取课程' }))
 }
 
-test('password login for legacy U-campus needs no cookies, JSON or course URL', async () => {
+test('password login for U-campus AI needs no cookies, JSON or course URL', async () => {
   const user = userEvent.setup()
   render(<EnglishLearning />)
-  await login(user, 'unipus')
+  await login(user, 'unipus_ai')
   await screen.findByRole('button', { name: '读取课程内容' })
   const body = JSON.parse(mocks.api.mock.calls.find(([p, o]) => p === '/english-learning/logins' && o?.method === 'POST')[1].body)
-  expect(body).toEqual({ platform: 'unipus', username: 'account', password: 'private-password' })
+  expect(body).toEqual({ platform: 'unipus_ai', username: 'account', password: 'private-password' })
   expect(screen.getByRole('option', { name: 'My English' })).toBeInTheDocument()
   expect(screen.queryByLabelText('密码')).not.toBeInTheDocument()
   expect(JSON.stringify(localStorage)).not.toContain('private-password')
@@ -126,7 +126,7 @@ test('WeChat QR login needs no credentials, can renew QR, and hands off to cours
 test('expired QR is hidden, pending QR can be recovered, and U-campus has no WeChat entry', async () => {
   const user = userEvent.setup()
   const view = render(<EnglishLearning />)
-  await user.selectOptions(screen.getByLabelText('平台'), 'unipus')
+  await user.selectOptions(screen.getByLabelText('平台'), 'unipus_ai')
   expect(screen.queryByRole('button', { name: '微信扫码登录' })).not.toBeInTheDocument()
   view.unmount()
   mocks.api.mockImplementation(async (path) => path === '/english-learning/tasks' ? { tasks: [] }

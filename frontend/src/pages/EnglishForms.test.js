@@ -104,3 +104,21 @@ test('stale control markers cannot bind hidden fields and completed widgets are 
 // Restore the global DOM shim when this module is unloaded by the runner.
 import { afterAll } from 'vitest'
 afterAll(() => { HTMLElement.prototype.getClientRects = originalRects })
+
+test('WE listening dialogue blanks use their bound hidden result without leaking it to the question', () => {
+  document.body.innerHTML = `<video></video><div class="transcript" hidden>Not currently available</div>
+    <p>Dad: Wow, 1 <span data-controltype="filling"><input data-itemtype="input"><span hidden data-itemtype="result">all packed</span></span> already?</p>
+    <p>Daughter: Seat belt, 2 <span data-controltype="filling"><input data-itemtype="input"><span hidden data-itemtype="result">I'll be</span></span> safe.</p>`
+  expect(document.getElementsByTagName('video')).toHaveLength(1)
+  expect(document.querySelector('.transcript').hidden).toBe(true)
+  const form = extract()
+  expect(form.unsupported).toBe(0)
+  expect(form.questions).toHaveLength(2)
+  expect(form.questions[0].title).toContain('already?')
+  expect(form.questions[0].title).not.toContain('all packed')
+  expect(form.questions[0].requires_native).toBe(true)
+  expect(native(form.questions[0])).toEqual([['all packed']])
+  expect(native(form.questions[1])).toEqual([["I'll be"]])
+  document.querySelector('[data-itemtype=result]').textContent = '(Answers may vary.)'
+  expect(native(extract().questions[0])).toEqual([])
+})

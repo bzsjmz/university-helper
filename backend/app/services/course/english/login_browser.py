@@ -8,13 +8,13 @@ import json
 import time
 from urllib.parse import urlsplit
 
-from .clients import PlatformError, Welearn, course_url, storage_state
+from .clients import PlatformError, Welearn, storage_state
 from .login_view import login_picture
 from .login_handoff import WechatHandoff, read_login_command
 
 LOGIN_URLS = {
     'welearn': 'https://welearn.sflep.com/user/prelogin.aspx?loginret=https%3A%2F%2Fwelearn.sflep.com%2Fstudent%2Findex.aspx',
-    'unipus': 'https://u.unipus.cn/user/student',
+    'unipus_ai': 'https://sso.unipus.cn/sso/login?service=https%3A%2F%2Fuai.unipus.cn',
 }
 WIDTH, HEIGHT = 1000, 760
 
@@ -37,9 +37,18 @@ def allowed_login_url(url, platform, method='password'):
 
 
 def allowed_login_request(request, platform, method):
+    if platform == 'unipus_ai':
+        from .uai import decorative_portal_resource
+        if decorative_portal_resource(request):
+            return False
     if allowed_login_url(request.url, platform, method):
         return True
     parsed = urlsplit(request.url)
+    if (platform == 'unipus_ai' and parsed.scheme == 'https'
+            and parsed.hostname in ('static.geetest.com', 'api.geetest.com', 'apiv6.geetest.com', 'static.geevisit.com', 'api.geevisit.com')
+            and parsed.port in (None, 443) and not parsed.username and not parsed.password
+            and request.method == 'GET' and not request.is_navigation_request()):
+        return True
     # Exact official QR asset/polling hosts only. Desktop WeChat's localhost
     # helper and unrelated QQ/WeChat sites remain unavailable to this browser.
     return (platform == 'welearn' and method == 'wechat' and parsed.scheme == 'https'
@@ -61,19 +70,6 @@ def wechat_picture(page):
     return None, None
 
 
-def courses_from_links(links):
-    courses, seen = [], set()
-    for link in links[:1000]:
-        try:
-            url = course_url(link['href'])
-        except (PlatformError, KeyError, TypeError, ValueError):
-            continue
-        if url not in seen:
-            seen.add(url)
-            courses.append({'id': url, 'name': str(link.get('name') or f'U校园课程 {len(courses)+1}')[:256]})
-    return courses[:200]
-
-
 def authenticated_result(context, page, platform):
     if not allowed_url(page.url, platform):
         return None
@@ -93,25 +89,18 @@ def authenticated_result(context, page, platform):
         finally:
             client.session.close()
         return {'credential': credential, 'courses': courses}
-    if parsed.hostname != 'u.unipus.cn':
+    if platform != 'unipus_ai' or parsed.hostname != 'uai.unipus.cn':
         return None
-    if page.locator('[name="password"]:visible').count():
+    from .uai import courses as uai_courses
+    listed = uai_courses(context, page)
+    if not listed:
         return None
-    links = page.locator('a[href]').evaluate_all('''es => es.slice(0,1000).map(e => ({
-        href:e.href,name:(e.innerText || e.title || e.querySelector('img')?.alt || '').trim().slice(0,256)}))''')
-    if parsed.path == '/user/student/mycourse/courseCatalog':
-        links.insert(0, {'href': page.url, 'name': page.title() or 'U校园课程'})
-    courses = courses_from_links(links)
-    if not courses:
-        return None  # The user can click their course card in the same official page.
     state = context.storage_state()
-    # Export only the existing adapter's exact platform scope, never SSO/other-site data.
     state['cookies'] = [c for c in state['cookies'] if c['domain'].lstrip('.') == 'unipus.cn'
                         or c['domain'].endswith('.unipus.cn')]
     state['origins'] = [o for o in state['origins'] if o['origin'] in
-                        ('https://u.unipus.cn', 'https://ucontent.unipus.cn')]
-    credential = json.dumps(storage_state(json.dumps(state)))
-    return {'credential': credential, 'courses': courses}
+                        ('https://uai.unipus.cn', 'https://ucontent.unipus.cn')]
+    return {'credential': json.dumps(storage_state(json.dumps(state))), 'courses': listed}
 
 
 def operate(page, command):
@@ -235,8 +224,8 @@ def login_browser(request):
                                'scanned': '扫码成功，请在手机微信中确认登录。',
                                'expired': '二维码已过期，请点击“刷新二维码”重新获取。'}.get(qr_status,
                         '正在等待微信授权返回。未绑定的微信请先到 WE Learn 官网完成绑定。')
-                if platform == 'unipus' and urlsplit(page.url).hostname == 'u.unipus.cn':
-                    message = '请在下方官网画面中点选课程，系统会自动读取课程目录。'
+                if platform == 'unipus_ai' and urlsplit(page.url).hostname == 'uai.unipus.cn':
+                    message = '正在连接 U校园 AI版并读取已开通的教程。'
                 if returning:
                     message = '微信授权已离开扫码页，正在连接 WE Learn 并读取课程，请稍候。'
                 elif not image:

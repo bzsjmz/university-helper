@@ -6,8 +6,8 @@ from pathlib import Path
 FORM_SCRIPT = Path(__file__).with_name('question_form.js').read_text(encoding='utf-8')
 # Deliberately narrow: a click is not proof of a successful save/submission.
 RECEIPT_SCRIPT = r"""() => Array.from(document.querySelectorAll(
-  '[role=dialog], .ant-modal-content, .completion, .result, .save-success, .submit-success'
-)).filter(e => e.getClientRects().length).map(e => e.innerText || '').join('\n').slice(0,10000)"""
+  '[role=dialog], .ant-modal-content, .completion, .result, .save-success, .submit-success, [data-submitted]'
+)).filter(e => e.getClientRects().length).map(e => e.hasAttribute('data-submitted') && ['', 'true', '1', 'submitted'].includes(e.getAttribute('data-submitted')) ? '课件已提交' : (e.innerText || '')).join('\n').slice(0,10000)"""
 
 
 def read_form(frame):
@@ -32,6 +32,10 @@ def public_question(question):
     return {k: question[k] for k in ('type', 'title', 'context', 'options', 'count')}
 
 
+def custom_selected(locator):
+    return locator.evaluate("e => e.getAttribute('aria-checked') === 'true' || e.getAttribute('aria-selected') === 'true' || e.getAttribute('data-selected') === 'true' || ['selected','checked','active','ui-state-active'].some(c => e.classList.contains(c))")
+
+
 def fill_question(frame, question, answer):
     controls = [frame.locator(f'[data-uh-control="{i}"]') for i in question['controls']]
     kind = question['type']
@@ -42,6 +46,9 @@ def fill_question(frame, question, answer):
             return False
         if kind == 'single' and len(answer) != 1:
             return False
+        if question.get('control_types', [None])[0] == 'welearn-option':
+            controls[answer[0]].click()
+            return all(custom_selected(locator) == (i in answer) for i, locator in enumerate(controls))
         if question['values']:
             controls[0].select_option(value=question['values'][answer[0]])
             return controls[0].input_value() == question['values'][answer[0]]
@@ -63,6 +70,8 @@ def fill_question(frame, question, answer):
 def verify_question(frame, question, answer):
     controls = [frame.locator(f'[data-uh-control="{i}"]') for i in question['controls']]
     if question['type'] in ('single', 'multiple'):
+        if question.get('control_types', [None])[0] == 'welearn-option':
+            return all(custom_selected(locator) == (i in answer) for i, locator in enumerate(controls))
         if question['values']:
             return controls[0].input_value() == question['values'][answer[0]]
         return all(locator.is_checked() == (i in answer) for i, locator in enumerate(controls))
@@ -75,8 +84,7 @@ def button(frame, names):
         candidate = frame.get_by_role('button', name=name, exact=True)
         if candidate.count() == 1 and candidate.is_visible() and candidate.is_enabled():
             return candidate
-    # Legacy U-campus uses a styled div instead of a semantic button.
-    candidate = frame.locator('[class*="submit-bar-pc--btn"]').filter(
+    candidate = frame.locator('[data-controltype="submit"], [class*="submit-bar-pc--btn"]').filter(
         has_text=re.compile('^(?:' + '|'.join(re.escape(n) for n in names) + ')$'))
     if candidate.count() == 1 and candidate.is_visible() and candidate.is_enabled():
         return candidate
@@ -121,7 +129,8 @@ def answer_page(page, solve, *, submit=False, deadline=None, native=None):
                 value = native.answer(frame, question)
                 if value is not None:
                     request['native_answer'] = value
-            result = solve(request)
+            result = ({'answer': None} if question.get('requires_native') and 'native_answer' not in request
+                      else solve(request))
             answer = result.get('answer')
             answers.append(answer)
             if answer is None:
@@ -159,10 +168,15 @@ def answer_page(page, solve, *, submit=False, deadline=None, native=None):
         return {'status': 'needs_manual', 'message': '答题预算耗尽，未点击保存/提交', 'counts': counts}
     # From this point, failure must never cause an automatic re-submit.
     try:
+        confirmation = frame.locator('.cmd_submit:visible').filter(has_text=re.compile(r'^(?:Submit|提交|确认提交|确定提交)$'))
+        had_confirmation = confirmation.count() > 0
         action.click(timeout=10000)
+        page.wait_for_timeout(500)
+        if submit and not had_confirmation and confirmation.count() == 1:
+            confirmation.click(timeout=10000)
         page.wait_for_timeout(1500)
         receipt = frame.evaluate(RECEIPT_SCRIPT)
-        marker = ('提交成功', '作业已提交', '本次共完成', '正确率') if submit else ('保存成功', '已保存')
+        marker = ('提交成功', '作业已提交', '本次共完成', '正确率', '课件已提交') if submit else ('保存成功', '已保存')
         if (receipt != before and any(text in receipt for text in marker)
                 and not any(text in receipt for text in ('提交失败', '保存失败', '频繁', '操作过快', '验证码', '未答完', '未作答', '网络错误'))):
             counts['submitted' if submit else 'saved'] = 1

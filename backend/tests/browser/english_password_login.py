@@ -15,14 +15,14 @@ from app.services.course.english.login_view import blank_png, login_picture
 
 class BrowserLoginTest(unittest.TestCase):
     def run_flow(self, platform, commands=(), *, captcha=False, agreement=False):
-        host = 'welearn.sflep.com' if platform == 'welearn' else 'u.unipus.cn'
-        destination = '/student/index.aspx' if platform == 'welearn' else '/user/student/mycourse/index'
+        host = 'welearn.sflep.com' if platform == 'welearn' else 'uai.unipus.cn'
+        destination = '/student/index.aspx' if platform == 'welearn' else '/home'
         extra = ''
         if captcha:
             extra = '<input required placeholder="图形验证码" style="position:absolute;left:20px;top:105px;width:160px;height:30px">'
         if agreement:
             extra = '<input required type="checkbox" style="position:absolute;left:20px;top:105px;width:20px;height:20px">'
-        form = f'''<html><body><form onsubmit="event.preventDefault();document.cookie='sid=fixture-cookie;path=/;Secure';location.href='{destination}'">
+        form = f'''<html><body><form onsubmit="event.preventDefault();document.cookie='sid=fixture-cookie;path=/;Secure';location.href='https://{host}{destination}'">
           <input name="username" style="position:absolute;left:20px;top:20px">
           <input name="password" type="password" style="position:absolute;left:20px;top:60px">
           {extra}<button style="position:absolute;left:20px;top:150px;width:160px;height:30px">登录</button>
@@ -56,7 +56,8 @@ class BrowserLoginTest(unittest.TestCase):
         with patch('playwright.sync_api.sync_playwright', playwright_fixture), \
                 patch('app.services.course.english.login_handoff.sys.stdin', fake_stdin), \
                 patch('app.services.course.english.login_browser.Welearn.courses',
-                      return_value=[{'id': '1', 'name': 'My English'}]), redirect_stdout(output):
+                      return_value=[{'id': '1', 'name': 'My English'}]), \
+                patch('app.services.course.english.uai.courses', return_value=[{'id': 'ai-1', 'name': 'My English'}]), redirect_stdout(output):
             login_browser(request)
         self.assertNotIn('password', request)
         replies = [json.loads(line) for line in output.getvalue().splitlines()]
@@ -241,12 +242,12 @@ class BrowserLoginTest(unittest.TestCase):
         ], captcha=True)
         self.assertEqual(len(replies), 4)
 
-    def test_unipus_agreement_is_explicit_and_course_url_is_discovered(self):
-        replies = self.run_flow('unipus', [
+    def test_unipus_ai_agreement_is_explicit_and_course_list_is_read_after_sso(self):
+        replies = self.run_flow('unipus_ai', [
             {'action': 'click', 'x': 30, 'y': 115}, {'action': 'click', 'x': 90, 'y': 165},
         ], agreement=True)
         self.assertEqual(len(replies), 3)
-        self.assertTrue(replies[-1]['courses'][0]['id'].startswith('https://u.unipus.cn/'))
+        self.assertEqual(replies[-1]['courses'][0]['id'], 'ai-1')
         self.assertEqual(json.loads(replies[-1]['credential'])['cookies'][0]['value'], 'fixture-cookie')
 
 

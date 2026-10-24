@@ -1,6 +1,11 @@
 () => {
   const visible = e => !!e.getClientRects().length && !e.closest('[hidden], [aria-hidden="true"]');
-  const text = e => (e?.innerText || e?.textContent || '').replace(/\s+/g, ' ').trim();
+  const text = e => {
+    if (!e) return '';
+    const copy = e.cloneNode(true);
+    copy.querySelectorAll('[data-itemtype="result"], script, style, [hidden], [aria-hidden="true"]').forEach(n => n.remove());
+    return (copy.textContent || '').replace(/\s+/g, ' ').trim();
+  };
   const body = text(document.body);
   if (/(请输入验证码|滑动验证|人脸识别|人脸验证|监考|考试口令|已截止|已过期|请先登录)/.test(body))
     return { questions: [], unsupported: 1, blocked: true };
@@ -23,12 +28,16 @@
   unsupported += Array.from(document.querySelectorAll('[contenteditable="true"]')).filter(visible).length;
   // A custom courseware widget with no supported native controls must not be
   // silently ignored when another question on the same page is recognized.
-  unsupported += [...document.querySelectorAll('et-choice, et-tof, et-blank, et-toggle, [data-controltype="filling"], [data-controltype="fillinglong"], [data-controltype="choice"]')]
+  unsupported += [...document.querySelectorAll('et-choice, et-tof, et-blank, et-toggle, [data-controltype="filling"], [data-controltype="fillinglong"]')]
     .filter(e => visible(e) && !e.querySelector('input:not([type="hidden"]):not([type="button"]):not([type="submit"]), textarea, select')).length;
   const questions = [];
   for (const [root, controls] of roots) {
-    const stem = text(root.querySelector('.question-title, .stem, [class*="questionTitle"]')) || text(root);
-    if (!stem || stem.length > 12000 || root.querySelector('img') || (root.querySelector('audio,video') && !root.querySelector('.transcript, [class*=transcript]'))) {
+    const courseware = root.matches('[data-controltype="filling"], [data-controltype="fillinglong"]');
+    const line = courseware ? (root.parentElement?.closest('p, tr, li') || root.parentElement) : null;
+    const ownStem = text(root.querySelector('.question-title, .stem, [class*="questionTitle"]')) || text(root);
+    const stem = courseware && !/[A-Za-z\u4e00-\u9fff]/.test(ownStem) ? text(line) : ownStem;
+    const nativeOnly = courseware && !!(document.getElementsByTagName('audio').length || document.getElementsByTagName('video').length) && ![...document.querySelectorAll('.transcript, [class*="transcript"]')].some(e => visible(e) && text(e));
+    if (!stem || stem.length > 12000 || [...root.querySelectorAll('img')].some(e => visible(e) && !e.closest('[data-itemtype="result"]')) || (!courseware && root.querySelector('audio,video') && !root.querySelector('.transcript, [class*=transcript]'))) {
       unsupported += controls.length; continue;
     }
     const types = new Set(controls.map(e => e.type));
@@ -57,7 +66,24 @@
     root.setAttribute('data-uh-question-root', String(questions.length));
     questions.push({ type, title: stem, context, options,
       count: ['single','multiple'].includes(type) ? 1 : controls.length,
-      controls: ids, control_types: controls.map(e => e.type), values });
+      ...(nativeOnly ? {requires_native: true} : {}), controls: ids, control_types: controls.map(e => e.type), values });
+  }
+  // WE Learn also uses clickable option rows rather than radio inputs.
+  for (const root of document.querySelectorAll('[data-controltype="choice"]')) {
+    if (!visible(root) || roots.has(root)) continue;
+    const rows = [...root.querySelectorAll('ul[data-itemtype="options"] > li')].filter(visible);
+    const title = text(root.querySelector('.question-title, .stem, [data-itemtype="question"]')) || text(root);
+    const options = rows.map(text);
+    if (!title || rows.length < 2 || rows.length > 26 || new Set(options).size !== rows.length || options.some(s => !s) || root.querySelector('img, audio, video')) {
+      unsupported++; continue;
+    }
+    const ids = rows.map((e,i) => {
+      const id = String(editable.length + questions.length * 30 + i);
+      e.setAttribute('data-uh-control', id); return id;
+    });
+    root.setAttribute('data-uh-question-root', String(questions.length));
+    questions.push({type:'single', title, context, options, count:1, controls:ids,
+      control_types:rows.map(() => 'welearn-option'), values:[]});
   }
   if (questions.length > 100) return { questions: [], unsupported: editable.length, blocked: true };
   return { questions, unsupported, blocked: false };
