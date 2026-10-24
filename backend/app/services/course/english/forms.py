@@ -14,6 +14,20 @@ def read_form(frame):
     return frame.evaluate(FORM_SCRIPT)
 
 
+def frame_visible(frame):
+    try:
+        for _ in range(16):
+            parent = frame.parent_frame
+            if parent is None:
+                return True
+            if not frame.frame_element().is_visible():
+                return False
+            frame = parent
+    except Exception:
+        pass
+    return False
+
+
 def public_question(question):
     return {k: question[k] for k in ('type', 'title', 'context', 'options', 'count')}
 
@@ -79,6 +93,8 @@ def answer_page(page, solve, *, submit=False, deadline=None, native=None):
                   saved=0, submitted=0, submission_unknown=0, native_answers=0, cache_hits=0, ai_answers=0)
     forms = []
     for frame in page.frames:
+        if not frame_visible(frame):
+            continue
         snapshot = read_form(frame)
         if snapshot.get('blocked'):
             return {'status': 'needs_manual', 'message': '页面要求人工验证或尚未开放，未填写或提交', 'counts': counts}
@@ -94,6 +110,8 @@ def answer_page(page, solve, *, submit=False, deadline=None, native=None):
     for frame, snapshot in forms:
         answers = []
         for question in snapshot['questions']:
+            if not frame_visible(frame):
+                return {'status': 'needs_manual', 'message': '课件页面已切换，未继续答题或提交', 'counts': counts}
             if deadline is not None and time.monotonic() >= deadline:
                 counts['missing'] += 1
                 answers.append(None)
@@ -118,7 +136,7 @@ def answer_page(page, solve, *, submit=False, deadline=None, native=None):
     if counts['missing'] or counts['unsupported']:
         return {'status': 'needs_manual', 'message': '存在缺失答案或不支持题型，未填写或提交', 'counts': counts}
     for frame, snapshot, answers in plans:
-        if read_form(frame) != snapshot:
+        if not frame_visible(frame) or read_form(frame) != snapshot:
             return {'status': 'needs_manual', 'message': '答题期间页面发生变化，请刷新后重试；未提交', 'counts': counts}
         for question, answer in zip(snapshot['questions'], answers):
             if deadline is not None and time.monotonic() >= deadline:
@@ -128,10 +146,10 @@ def answer_page(page, solve, *, submit=False, deadline=None, native=None):
             counts['filled'] += 1
     # Recheck the whole page after all inputs, before selecting one native action.
     for frame, snapshot, answers in plans:
-        if read_form(frame) != snapshot or not all(verify_question(frame, q, a) for q, a in zip(snapshot['questions'], answers)):
+        if not frame_visible(frame) or read_form(frame) != snapshot or not all(verify_question(frame, q, a) for q, a in zip(snapshot['questions'], answers)):
             return {'status': 'needs_manual', 'message': '填写后页面或答案变化，未提交', 'counts': counts}
     names = ('提交', '提交作业', '提交答案', 'Submit') if submit else ('保存', '暂存', '保存答案', '保存作业', 'Save', 'Save answers')
-    candidates = [(frame, button(frame, names)) for frame in page.frames]
+    candidates = [(frame, button(frame, names)) for frame in page.frames if frame_visible(frame)]
     candidates = [(frame, candidate) for frame, candidate in candidates if candidate is not None]
     if len(candidates) != 1:
         return {'status': 'needs_manual', 'message': '已填写，但未找到唯一保存/提交按钮，平台保存状态未确认', 'counts': counts}

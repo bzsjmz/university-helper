@@ -13,7 +13,7 @@ from app.services.course.chaoxing.answer_cache import CacheDAO
 
 
 class NativeBrowserTest(unittest.TestCase):
-    def run_page(self, html, *, xml=None):
+    def run_page(self, html, *, xml=None, iframe=False):
         with tempfile.TemporaryDirectory() as temporary, sync_playwright() as p:
             browser = p.chromium.launch(headless=True, chromium_sandbox=True)
             try:
@@ -23,15 +23,23 @@ class NativeBrowserTest(unittest.TestCase):
                 page = context.new_page()
                 page.set_default_timeout(5000)
                 def route(request):
-                    if request.request.url.endswith('item.xml'):
+                    url = request.request.url
+                    if url.endswith('item.xml'):
                         request.fulfill(status=200, content_type='application/xml',
                             headers={'content-length': str(len(xml))}, body=xml)
+                    elif iframe and url.endswith('current.html'):
+                        request.fulfill(status=200, content_type='text/html; charset=utf-8', body=
+                            '<iframe src="https://centercourseware.sflep.com/lesson.html" style="width:800px;height:600px"></iframe>')
+                    elif url.endswith('hidden.html'):
+                        request.fulfill(status=200, content_type='text/html', body=
+                            '<div class="question"><h3>Not selected</h3><input type="password"></div>')
                     else:
                         request.fulfill(status=200, content_type='text/html; charset=utf-8', body=html)
                 page.route('**/*', route)
                 page.goto('https://centercourseware.sflep.com/current.html', wait_until='load')
                 if xml:
-                    page.wait_for_function('window.xmlLoaded === true')
+                    target = page.frame(url='https://centercourseware.sflep.com/lesson.html') if iframe else page
+                    target.wait_for_function('window.xmlLoaded === true')
                 cache_path = str(Path(temporary) / 'cache.json')
                 with patch('app.services.course.english.answering.CacheDAO', lambda: CacheDAO(cache_path)), \
                         patch('app.services.course.english.answering.get_provider',
@@ -57,7 +65,7 @@ class NativeBrowserTest(unittest.TestCase):
           <div class="result"></div></body></html>''')
         self.assertEqual(result['counts']['native_answers'], 2)
 
-    def test_loaded_xml_uses_item_response_and_reordered_choice_ids(self):
+    def test_visible_iframe_xml_uses_item_response_and_reordered_choice_ids(self):
         xml = b'''<assessmentItem identifier="Q1"><responseDeclaration identifier="R">
           <correctResponse><value>blue-id</value></correctResponse></responseDeclaration>
           <itemBody><choiceInteraction responseIdentifier="R"><prompt>Choose blue.</prompt>
@@ -70,7 +78,16 @@ class NativeBrowserTest(unittest.TestCase):
           <button onclick="document.querySelector('.result').textContent='保存成功'">保存</button>
           <div class="result"></div>
           <script>fetch('/item.xml').then(r => r.text()).then(() => window.xmlLoaded = true)</script>
-          </body></html>''', xml=xml)
+          </body></html>''', xml=xml, iframe=True)
+        self.assertEqual(result['counts']['native_answers'], 1)
+
+    def test_hidden_preloaded_frame_is_not_answered_or_charged(self):
+        result = self.run_page('''<html><body>
+          <iframe src="https://centercourseware.sflep.com/hidden.html" style="display:none"></iframe>
+          <div class="question"><h3 class="stem">Selected</h3><input type="text" data-solution="word"></div>
+          <button onclick="document.querySelector('.result').textContent='保存成功'">保存</button>
+          <div class="result"></div></body></html>''')
+        self.assertEqual(result['counts']['questions'], 1)
         self.assertEqual(result['counts']['native_answers'], 1)
 
 

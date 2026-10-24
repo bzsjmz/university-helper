@@ -82,7 +82,7 @@ def test_new_task_gets_new_provider_but_reuses_shared_request_gate(monkeypatch):
 
 
 def fake_page(monkeypatch, *, missing=False, unsupported=0, submit=True, receipt='提交成功'):
-    frame = Mock()
+    frame = Mock(parent_frame=None)
     snapshot = {'questions': [{**question(), 'controls': ['0','1'], 'control_types': ['radio','radio'], 'values': []}],
                 'unsupported': unsupported, 'blocked': False}
     monkeypatch.setattr(forms, 'read_form', lambda f: snapshot)
@@ -126,7 +126,7 @@ def test_save_and_submit_are_distinct(monkeypatch):
 def test_post_fill_recheck_failure_prevents_submit(monkeypatch):
     # Override only the second verification step, after the native fill.
     original = forms.answer_page
-    frame = Mock()
+    frame = Mock(parent_frame=None)
     snapshot = {'questions': [{**question(), 'controls': ['0','1'], 'values': []}], 'unsupported': 0, 'blocked': False}
     monkeypatch.setattr(forms, 'read_form', lambda f: snapshot)
     monkeypatch.setattr(forms, 'fill_question', Mock(return_value=True))
@@ -183,7 +183,7 @@ def test_fill_and_read_back_use_native_controls():
         def input_value(self): return self.value
         def select_option(self, value): self.value = value
     controls = {'0': Input(), '1': Input()}
-    frame = Mock()
+    frame = Mock(parent_frame=None)
     frame.locator.side_effect = lambda selector: controls[selector.split('"')[1]]
     q = {**question(), 'controls': ['0', '1'], 'values': []}
     assert forms.fill_question(frame, q, [1]) is True
