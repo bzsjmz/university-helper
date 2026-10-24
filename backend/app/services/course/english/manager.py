@@ -134,6 +134,10 @@ class EnglishManager:
                                 task['counts']['questions'] = task['counts'].get('questions', 0) + 1
                                 field = 'answered' if result.get('answer') is not None else 'missing'
                                 task['counts'][field] = task['counts'].get(field, 0) + 1
+                                source_field = {'native': 'native_answers', 'cache': 'cache_hits',
+                                                'ai': 'ai_answers'}.get(result.get('source'))
+                                if source_field:
+                                    task['counts'][source_field] = task['counts'].get(source_field, 0) + 1
                         process.stdin.write(json.dumps(result).encode() + b'\n')
                         process.stdin.flush()
                     elif event.get('ok'):

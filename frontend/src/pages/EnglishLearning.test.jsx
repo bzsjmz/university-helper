@@ -65,7 +65,7 @@ test('submission and paid AI require distinct explicit options in task preview',
   await screen.findByRole('option', { name: /Reading/ })
   await user.selectOptions(screen.getByLabelText('本次内容'), 'i')
   const autoSubmit = screen.getByRole('checkbox', { name: /整页答案完整/ })
-  const paidAi = screen.getByRole('checkbox', { name: /缓存未命中/ })
+  const paidAi = screen.getByRole('checkbox', { name: /课件与缓存均未命中/ })
   expect(autoSubmit).not.toBeChecked()
   expect(paidAi).toBeChecked()
   await user.click(autoSubmit)

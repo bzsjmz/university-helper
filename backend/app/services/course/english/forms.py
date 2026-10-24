@@ -69,14 +69,14 @@ def button(frame, names):
     return None
 
 
-def answer_page(page, solve, *, submit=False, deadline=None):
+def answer_page(page, solve, *, submit=False, deadline=None, native=None):
     """All frames are checked before filling; one unknown control blocks submission.
 
     A task handles exactly the selected page. It never walks to another page,
     retakes a paper, or retries a click whose outcome is unknown.
     """
     counts = dict(questions=0, answered=0, missing=0, unsupported=0, filled=0,
-                  saved=0, submitted=0, submission_unknown=0, cache_hits=0, ai_answers=0)
+                  saved=0, submitted=0, submission_unknown=0, native_answers=0, cache_hits=0, ai_answers=0)
     forms = []
     for frame in page.frames:
         snapshot = read_form(frame)
@@ -98,13 +98,19 @@ def answer_page(page, solve, *, submit=False, deadline=None):
                 counts['missing'] += 1
                 answers.append(None)
                 continue
-            result = solve(public_question(question))
+            request = public_question(question)
+            if native is not None:
+                value = native.answer(frame, question)
+                if value is not None:
+                    request['native_answer'] = value
+            result = solve(request)
             answer = result.get('answer')
             answers.append(answer)
             if answer is None:
                 counts['missing'] += 1
             else:
                 counts['answered'] += 1
+                counts['native_answers'] += int(result.get('source') == 'native')
                 counts['cache_hits'] += int(result.get('source') == 'cache')
                 counts['ai_answers'] += int(result.get('source') == 'ai')
         plans.append((frame, snapshot, answers))

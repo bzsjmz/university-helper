@@ -11,6 +11,7 @@ import threading
 from app.services.course.chaoxing import query_control as control
 from app.services.course.chaoxing.answer_cache import CacheDAO
 from app.services.course.chaoxing.answer_providers.ai import AI
+from .native_answers import valid_native
 
 
 class InvalidQuestion(ValueError):
@@ -101,15 +102,43 @@ class EnglishSolver:
         self.should_stop = should_stop or (lambda: False)
 
     @control.bounded_query
-    def _solve(self, question):
+    def _solve(self, question, native=None):
         # Keep this cache namespace separate from legacy question-title entries.
         identity = json.dumps({'version': 1, 'platform': self.platform, 'course': self.course,
             'endpoint': os.environ.get('CHAOXING_AI_ENDPOINT', ''),
             'model': os.environ.get('CHAOXING_AI_MODEL', ''), **question}, sort_keys=True, ensure_ascii=False)
         cache_question = {'type': 'completion', 'title': 'english-v1:' + identity,
                           'options': [], 'scope': self.platform}
+        native_identity = json.dumps({'platform': self.platform, 'course': self.course, **question},
+                                     sort_keys=True, ensure_ascii=False)
+        native_question = {'type': 'completion', 'title': 'english-native-v1:' + native_identity,
+                           'options': [], 'scope': self.platform}
         cache = CacheDAO()
+        if native is not None:
+            # Native solutions must not wait behind an already-running AI call.
+            canonical = [chr(65+i) for i in native] if question['type'] in ('single', 'multiple') else native
+            cache.add_question_cache(native_question, json.dumps(canonical, ensure_ascii=False))
+            return {'answer': native, 'source': 'native'}
+
+        def native_cached():
+            if self.platform == 'welearn':
+                cached_native = cache.get_question_cache(native_question)
+                if cached_native:
+                    try:
+                        valid = normalize_answer(question, json.loads(cached_native))
+                        if valid is not None:
+                            return {'answer': valid, 'source': 'cache'}
+                    except (ValueError, TypeError):
+                        pass
+            return None
+
+        cached = native_cached()
+        if cached is not None:
+            return cached
         with cache.question_lock(cache_question, {'source': 'english', 'allow_ai': self.allow_ai}) as flight:
+            cached = native_cached()
+            if cached is not None:
+                return cached
             if flight.get('miss'):
                 return {'answer': None, 'source': 'miss'}
             cached = cache.get_question_cache(cache_question)
@@ -139,6 +168,9 @@ class EnglishSolver:
             # _query retains dual-key fallback, HTTP attempt/token limits and
             # usage telemetry, without Tiku.query's raw question/answer logging.
             raw = provider._query(prompt)
+            cached = native_cached()
+            if cached is not None:
+                return cached
             valid = normalize_answer(question, raw)
             if valid is None:
                 flight['miss'] = True
@@ -150,8 +182,9 @@ class EnglishSolver:
     def solve(self, raw):
         try:
             question = validate_question(raw)
+            native = valid_native(question, raw.get('native_answer')) if self.platform == 'welearn' else None
             with control.job_scope(self.should_stop, answering=True):
-                return self._solve(question)
+                return self._solve(question, native)
         except (InvalidQuestion, control.QueryControlError, control.ProviderUnavailable):
             return {'answer': None, 'source': 'unavailable'}
 

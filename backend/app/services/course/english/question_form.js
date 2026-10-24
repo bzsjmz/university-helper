@@ -8,10 +8,12 @@
     .filter(visible).map(text).join('\n').slice(0,10000);
   const all = Array.from(document.querySelectorAll('input, textarea, select')).filter(e => visible(e) && !e.closest('nav, header, [role=search]'));
   const editable = all.filter(e => !['hidden','button','submit','reset'].includes(e.type) && !e.disabled && !e.readOnly);
+  document.querySelectorAll('[data-uh-control]').forEach(e => e.removeAttribute('data-uh-control'));
   editable.forEach((e,i) => e.setAttribute('data-uh-control', String(i)));
   const roots = new Map(); let unsupported = 0;
+  document.querySelectorAll('[data-uh-question-root]').forEach(e => e.removeAttribute('data-uh-question-root'));
   for (const e of editable) {
-    const root = e.closest('et-choice, et-tof, et-blank, .question, .question-item, [data-question-id], [class*="questionDefault"]');
+    const root = e.closest('et-choice, et-tof, et-blank, .question, .question-item, [data-question-id], [class*="questionDefault"], [data-controltype="filling"], [data-controltype="fillinglong"], [data-controltype="choice"]');
     if (!root || !['radio','checkbox','text','search','textarea','select-one'].includes(e.type)) {
       unsupported++; continue;
     }
@@ -19,6 +21,10 @@
     roots.get(root).push(e);
   }
   unsupported += Array.from(document.querySelectorAll('[contenteditable="true"]')).filter(visible).length;
+  // A custom courseware widget with no supported native controls must not be
+  // silently ignored when another question on the same page is recognized.
+  unsupported += [...document.querySelectorAll('et-choice, et-tof, et-blank, et-toggle, [data-controltype="filling"], [data-controltype="fillinglong"], [data-controltype="choice"]')]
+    .filter(e => visible(e) && !e.querySelector('input:not([type="hidden"]):not([type="button"]):not([type="submit"]), textarea, select')).length;
   const questions = [];
   for (const [root, controls] of roots) {
     const stem = text(root.querySelector('.question-title, .stem, [class*="questionTitle"]')) || text(root);
@@ -48,6 +54,7 @@
     } else if (Array.from(types).every(t => ['text','search','textarea'].includes(t))) {
       type = types.has('textarea') ? 'shortanswer' : 'completion';
     } else { unsupported += controls.length; continue; }
+    root.setAttribute('data-uh-question-root', String(questions.length));
     questions.push({ type, title: stem, context, options,
       count: ['single','multiple'].includes(type) ? 1 : controls.length,
       controls: ids, control_types: controls.map(e => e.type), values });

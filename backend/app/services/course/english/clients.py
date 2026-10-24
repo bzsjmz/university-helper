@@ -275,8 +275,11 @@ def welearn_answer(credential, cid, item, seconds, solve, submit=False):
     if item not in {i['id'] for i in items}:
         raise PlatformError('该小节不属于所选课程或尚未开放')
     url = Welearn.BASE + '/student/StudyCourse.aspx?' + urlencode({**identity, 'sco': item})
-    with unipus_browser(credential, platform='welearn') as (_, page):
+    with unipus_browser(credential, platform='welearn') as (context, page):
+        from .native_answers import NativeAnswers
+        native = NativeAnswers()
+        context.on('response', native.observe)
         page.goto(url, wait_until='domcontentloaded')
         page.wait_for_timeout(2000)
         from .forms import answer_page
-        return answer_page(page, solve, submit=submit, deadline=time.monotonic() + seconds)
+        return answer_page(page, solve, submit=submit, deadline=time.monotonic() + seconds, native=native)
