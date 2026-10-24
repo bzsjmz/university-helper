@@ -20,6 +20,7 @@ afterEach(cleanup)
 test('requires explicit course/content selection; credentials excluded from task and browser storage', async () => {
   const user = userEvent.setup()
   render(<EnglishLearning />)
+  await user.click(screen.getByText('高级：导入已有登录会话'))
   await user.type(screen.getByLabelText('Cookie'), 'sid=private')
   await user.click(screen.getByRole('button', { name: '连接并读取课程' }))
   await screen.findByRole('button', { name: '读取课程内容' })
@@ -41,19 +42,21 @@ test('requires explicit course/content selection; credentials excluded from task
   expect(screen.getByRole('button', { name: '确认并启动' })).toBeDisabled()
 })
 
-test('legacy U-campus explains browser state and manual interaction requirements', async () => {
+test('legacy U-campus defaults to password login and hides technical import fields', async () => {
   const user = userEvent.setup()
   render(<EnglishLearning />)
   await user.selectOptions(screen.getByLabelText('平台'), 'unipus')
-  expect(screen.getByLabelText('Storage state JSON')).toBeInTheDocument()
-  expect(screen.getByLabelText('课程目录网址')).toBeRequired()
-  expect(screen.getByText(/需要后端安装 Playwright/)).toBeInTheDocument()
+  expect(screen.getByLabelText('账号')).toBeVisible()
+  expect(screen.getByLabelText('密码')).toBeVisible()
+  expect(screen.getByLabelText('Storage state JSON')).not.toBeVisible()
+  expect(screen.getByLabelText('课程目录网址')).not.toBeVisible()
   expect(screen.getByText(/自动提交须单独勾选/)).toBeInTheDocument()
 })
 
 test('submission and paid AI require distinct explicit options in task preview', async () => {
   const user = userEvent.setup()
   render(<EnglishLearning />)
+  await user.click(screen.getByText('高级：导入已有登录会话'))
   await user.type(screen.getByLabelText('Cookie'), 'sid=private')
   await user.click(screen.getByRole('button', { name: '连接并读取课程' }))
   await screen.findByRole('button', { name: '读取课程内容' })

@@ -26,6 +26,8 @@ class EnglishManager:
         self.tasks = {}
         self.processes = set()
         self.closing = False
+        from .password_login import PasswordLogins
+        self.logins = PasswordLogins(self)
 
     def cleanup(self):
         now = time.monotonic()
@@ -36,6 +38,7 @@ class EnglishManager:
             for tid, task in list(self.tasks.items()):
                 if task['status'] not in ('running', 'stopping') and now - task['updated'] > 7200:
                     del self.tasks[tid]
+        self.logins.cleanup()
 
     @staticmethod
     def public(task):
@@ -67,12 +70,15 @@ class EnglishManager:
                 self.processes.discard(process)
 
     @staticmethod
-    def _spawn():
+    def _spawn(temporary_dir=None):
+        environment = {key: value for key, value in os.environ.items()
+            if key in {'PATH', 'LANG', 'LC_ALL', 'TZ', 'TMPDIR', 'PLAYWRIGHT_BROWSERS_PATH', 'XDG_RUNTIME_DIR'}}
+        if temporary_dir is not None:
+            environment['TMPDIR'] = temporary_dir
         return subprocess.Popen([sys.executable, '-B', '-m',
             'app.services.course.english.worker'], cwd=Path(__file__).resolve().parents[4],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-            start_new_session=True, env={key: value for key, value in os.environ.items()
-                if key in {'PATH', 'LANG', 'LC_ALL', 'TZ', 'TMPDIR', 'PLAYWRIGHT_BROWSERS_PATH', 'XDG_RUNTIME_DIR'}})
+            start_new_session=True, env=environment)
 
     def _communicate(self, process, request, task):
         try:
@@ -152,14 +158,25 @@ class EnglishManager:
                 raise PlatformError('请先断开不用的试用会话（每个用户最多保留 10 个）')
         result = self.execute({'platform': platform, 'credential': credential,
                                'course': course, 'action': 'connect'})
+        return self.adopt_login(owner, platform, {'credential': credential, **result}, course)
+
+    def adopt_login(self, owner, platform, result, course=''):
+        credential = result['credential']
+        courses = result['courses']
+        if platform == 'unipus':
+            storage_state(credential)
+            for entry in courses:
+                course_url(entry['id'])
         sid = uuid4().hex
         session = {'owner': owner, 'platform': platform, 'credential': encrypt_str(credential),
-                   'courses': result['courses'], 'items': {}, 'created': time.monotonic(), 'busy': False}
-        if platform == 'unipus':
+                   'courses': courses, 'items': {}, 'created': time.monotonic(), 'busy': False}
+        if platform == 'unipus' and course and 'items' in result:
             session['items'][course] = result['items']
         with self.lock:
+            if self.closing or sum(s['owner'] == owner for s in self.sessions.values()) >= 10:
+                raise PlatformError('请先断开不用的会话，或稍后重试')
             self.sessions[sid] = session
-        return {'session_id': sid, 'courses': result['courses']}
+        return {'session_id': sid, 'courses': courses}
 
     def session(self, owner, sid):
         self.cleanup()
@@ -259,11 +276,13 @@ class EnglishManager:
     def shutdown(self):
         with self.lock:
             self.closing = True
-            processes = list(self.processes)
             tasks = [(t['owner'], t['id']) for t in self.tasks.values()
                      if t['status'] in ('running', 'stopping')]
+        self.logins.shutdown()
         for owner, tid in tasks:
             self.stop(owner, tid)
+        with self.lock:
+            processes = list(self.processes)
         for process in processes:
             self.kill(process)
 

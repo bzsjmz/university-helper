@@ -1,14 +1,12 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../utils/api'
+import EnglishLogin from './EnglishLogin'
 
 const field = 'w-full rounded-lg border border-border bg-surface p-3 text-text'
 const button = 'rounded-lg border border-border bg-surface px-4 py-2 disabled:opacity-50'
 const statuses = { running: '执行中', stopping: '停止中', cancelled: '已停止', failed: '失败', finished: '会话结束', needs_manual: '需人工处理' }
 
 export default function EnglishLearning() {
-  const [platform, setPlatform] = useState('welearn')
-  const [credential, setCredential] = useState('')
-  const [url, setUrl] = useState('')
   const [session, setSession] = useState(null)
   const [course, setCourse] = useState('')
   const [items, setItems] = useState([])
@@ -48,19 +46,11 @@ export default function EnglishLearning() {
     finally { if (alive.current) setBusy(false) }
   }
 
-  const connect = (event) => {
-    event.preventDefault()
-    perform(async () => {
-      const result = await api('/english-learning/sessions', {
-        method: 'POST', timeoutMs: 125000, body: JSON.stringify({ platform, credential, course_url: url }),
-      })
-      if (!alive.current) return
-      setSession(result)
-      setCredential('')
-      setCourse('')
-      setMessage('连接成功。请选择课程并读取内容；会话最多保留一小时，重启后需要重新连接。')
-    })
-  }
+  const connected = useCallback((result) => {
+    setSession(result)
+    setCourse('')
+    setMessage('登录成功。请选择课程并读取内容。')
+  }, [])
 
   const readItems = () => perform(async () => {
     const version = ++revision.current
@@ -90,27 +80,10 @@ export default function EnglishLearning() {
       <div className="rounded-xl border border-border bg-surface p-4 text-sm leading-7">
         <p>支持所选内容当前页的自动答题/作业保存，也可切换为限时学习。自动答题复用本地缓存和服务器 AI；遇到缺失答案或不支持的题型会停止提交。</p>
         <p>自动提交须单独勾选；平台回执未确认时不会重试提交。验证码、监考、口语录音和无文本的听力需要人工处理，暂不自动考试或跨页遍历。</p>
-        <p>登录信息只在服务端短期会话中使用，不写入浏览器存储。请只导入目标平台的登录信息。</p>
+        <p>使用平台账号密码登录，验证码在本页完成。登录会话短期保留，退出或服务重启后需要重新登录。</p>
       </div>
       {!session ? (
-        <form onSubmit={connect} className="space-y-4 rounded-xl border border-border p-5">
-          <label className="block">平台
-            <select className={field} value={platform} disabled={busy} onChange={(e) => { setPlatform(e.target.value); setCredential(''); setUrl('') }}>
-              <option value="welearn">WE Learn</option><option value="unipus">老版 U校园</option>
-            </select>
-          </label>
-          {platform === 'unipus' && <>
-            <p className="text-sm text-text-muted">需要后端安装 Playwright／Chromium。请先在本机浏览器完成登录和验证码，再导出仅含 unipus.cn 信息的 Playwright storage state（cookies 和 origins），粘贴到下方。普通 Cookie 字符串不足以恢复老版的浏览器登录状态。</p>
-            <label className="block">课程目录网址
-              <input className={field} value={url} onChange={(e) => setUrl(e.target.value)} required type="url" disabled={busy} placeholder="https://u.unipus.cn/user/student/mycourse/courseCatalog?..." />
-            </label>
-          </>}
-          {platform === 'welearn' && <p className="text-sm text-text-muted">在官网登录后，从开发者工具 Network 中复制发往 welearn.sflep.com 的请求 Cookie。首次使用的小节需先在官网打开一次。</p>}
-          <label className="block">{platform === 'welearn' ? 'Cookie' : 'Storage state JSON'}
-            <textarea className={field} rows={5} value={credential} onChange={(e) => setCredential(e.target.value)} required disabled={busy} autoComplete="off" spellCheck={false} maxLength={100000} />
-          </label>
-          <button className={button} disabled={busy || !credential.trim()}>{busy ? '连接中…' : '连接并读取课程'}</button>
-        </form>
+        <EnglishLogin onConnected={connected} />
       ) : (
         <div className="space-y-4 rounded-xl border border-border p-5">
           <label className="block">课程
@@ -133,7 +106,7 @@ export default function EnglishLearning() {
             </select>
           </label>
           {mode === 'answer' && <div className="space-y-2 text-sm">
-            <p>两平台自动答题均需后端浏览器环境。默认尝试保存；填写不等于已保存，最终状态以平台回执为准。</p>
+            <p>默认尝试保存，最终状态以平台回执为准。</p>
             <label className="flex gap-2"><input type="checkbox" checked={allowAi} disabled={busy} onChange={(e) => setAllowAi(e.target.checked)} />缓存未命中时使用服务器 AI（可能产生费用）</label>
             <label className="flex gap-2"><input type="checkbox" checked={submit} disabled={busy} onChange={(e) => setSubmit(e.target.checked)} />整页答案完整并复核通过后，自动提交所选练习／作业</label>
           </div>}

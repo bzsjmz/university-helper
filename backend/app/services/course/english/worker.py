@@ -17,6 +17,10 @@ def main():
     try:
         request = json.loads(sys.stdin.buffer.readline(150_001))
         platform, action = request['platform'], request['action']
+        if action == 'login':
+            from .login_browser import login_browser
+            login_browser(request)
+            return
         if platform == 'welearn':
             client = Welearn(request['credential'])
             try:

@@ -3,13 +3,47 @@ import asyncio
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.exceptions import RequestValidationError
+from fastapi.routing import APIRoute
 from pydantic import BaseModel, Field, SecretStr, StrictBool, model_validator
 
 from app.dependencies import get_current_user_id
 from app.services.course.english.clients import PlatformError
 from app.services.course.english.manager import english_manager
 
-router = APIRouter()
+class PrivateRoute(APIRoute):
+    def get_route_handler(self):
+        original = super().get_route_handler()
+
+        async def handler(request):
+            try:
+                response = await original(request)
+                response.headers['Cache-Control'] = 'no-store'
+                return response
+            except RequestValidationError:
+                # Pydantic's default error can echo passwords or imported cookies.
+                raise HTTPException(422, '请求参数不正确，请检查输入') from None
+        return handler
+
+
+router = APIRouter(route_class=PrivateRoute)
+
+
+class PasswordLoginRequest(BaseModel):
+    platform: Literal['welearn', 'unipus']
+    username: SecretStr = Field(min_length=1, max_length=256)
+    password: SecretStr = Field(min_length=1, max_length=256)
+
+
+class LoginActionRequest(BaseModel):
+    action: Literal['click', 'drag', 'text', 'key', 'refresh', 'scroll']
+    x: int = Field(default=0, ge=0, lt=1000, strict=True)
+    y: int = Field(default=0, ge=0, lt=760, strict=True)
+    end_x: int = Field(default=0, ge=0, lt=1000, strict=True)
+    end_y: int = Field(default=0, ge=0, lt=760, strict=True)
+    text: SecretStr = Field(default=SecretStr(''), max_length=256)
+    key: Literal['Tab', 'Backspace', 'Delete', 'Enter', 'Escape', 'ArrowLeft', 'ArrowRight', 'Space'] = 'Tab'
+    delta_y: int = Field(default=0, ge=-600, le=600, strict=True)
 
 
 class ConnectRequest(BaseModel):
@@ -42,6 +76,35 @@ async def call(function, *args):
         return await asyncio.to_thread(function, *args)
     except PlatformError as exc:
         raise HTTPException(400, str(exc)) from None
+
+
+@router.post('/logins')
+async def password_login(request: PasswordLoginRequest, owner=Depends(get_current_user_id)):
+    return await call(english_manager.logins.start, owner, request.platform,
+                      request.username.get_secret_value(), request.password.get_secret_value())
+
+
+@router.get('/logins')
+async def pending_logins(owner=Depends(get_current_user_id)):
+    return {'logins': await call(english_manager.logins.list, owner)}
+
+
+@router.get('/logins/{lid}')
+async def login_status(lid: str, owner=Depends(get_current_user_id)):
+    return await call(english_manager.logins.exchange, owner, lid)
+
+
+@router.post('/logins/{lid}/actions')
+async def login_action(lid: str, request: LoginActionRequest, owner=Depends(get_current_user_id)):
+    command = request.model_dump(exclude={'text'})
+    command['text'] = request.text.get_secret_value()
+    return await call(english_manager.logins.exchange, owner, lid, command)
+
+
+@router.delete('/logins/{lid}')
+async def cancel_login(lid: str, owner=Depends(get_current_user_id)):
+    await call(english_manager.logins.cancel, owner, lid)
+    return {'cancelled': True}
 
 
 @router.post('/sessions')
