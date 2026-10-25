@@ -53,7 +53,7 @@ export default function EnglishLearning() {
   const connected = useCallback((result) => {
     setSession(result)
     setCourse('')
-    setMessage('登录成功。请选择课程并读取内容。')
+    setMessage(result.courses.length ? '登录成功。请选择课程并读取内容。' : '登录成功，但平台未返回可用课程。请在官网确认已开通教材或加入班级后重新登录。')
   }, [])
 
   const readItems = () => perform(async () => {

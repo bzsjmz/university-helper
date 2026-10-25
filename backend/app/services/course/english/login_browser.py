@@ -94,10 +94,12 @@ def authenticated_result(context, page, platform):
         return {'credential': credential, 'courses': courses}
     if platform != 'unipus_ai' or parsed.hostname not in ('ucloud.unipus.cn', 'uai.unipus.cn'):
         return None
+    from .uai_auth import browser_token
+    if re.match(r'^/(?:portal/)?sso(?:/|$)', parsed.path) or not browser_token(context):
+        return None
     from .uai import courses as uai_courses
     listed = uai_courses(context, page)
-    if not listed:
-        return None
+    # A validated empty bookshelf is a logged-in account, not a pending login.
     state = context.storage_state()
     state['cookies'] = [c for c in state['cookies'] if c['domain'].lstrip('.') == 'unipus.cn'
                         or c['domain'].endswith('.unipus.cn')]

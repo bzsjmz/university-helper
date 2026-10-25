@@ -241,18 +241,18 @@ def test_range_executes_in_catalog_order_and_aggregates_manual_results(manager):
 def test_uai_courses_use_existing_browser_jwt_only_on_fixed_official_origin():
     from app.services.course.english.uai import courses, COURSES
     response = Mock(status=200)
-    response.body.return_value = json.dumps({'code': 1, 'value': {'courseList': [
-        {'name': 'Group', 'courseResourceList': [{'instanceId': 'ai-1', 'name': 'AI English'},
-                                                {'instanceId': 'ai-1', 'name': 'duplicate'}]}]}}).encode()
+    response.body.return_value = json.dumps({'code': 1, 'value': {'groups': {'CLASS_COURSE': [{'instanceId': 'ai-1', 'name': 'AI English'},
+                                                {'instanceId': 'ai-1', 'name': 'duplicate'}]}}}).encode()
     context = Mock()
     context.cookies.return_value = [{'name': 'jwt', 'value': 'private-jwt'}]
     context.request.get.return_value = response
     assert courses(context) == [{'id': 'ai-1', 'name': 'AI English'}]
-    context.request.get.assert_called_once_with(COURSES, headers={'Authorization': 'private-jwt', 'u-app-id': '39', 'u-platform': '2',
+    context.request.get.assert_called_once_with(COURSES, headers={'Authorization': 'private-jwt',
             'Referer': 'https://uai.unipus.cn/portal/', 'Origin': 'https://uai.unipus.cn'}, timeout=15000, max_redirects=0)
     response.dispose.assert_called_once()
     context.cookies.return_value = []
-    assert courses(context) == []
+    with pytest.raises(PlatformError):
+        courses(context)
     assert context.request.get.call_count == 1
 
 
@@ -388,3 +388,69 @@ def test_welearn_internal_tabs_aggregate_answers_before_progress_confirmation(mo
     assert result['counts']['questions'] == 3 and result['counts']['native_answers'] == 3
     assert result['counts']['platform_completed'] == 1
     client.sco.assert_not_called()
+
+
+@pytest.mark.parametrize('token_fields', [{'tokenInfo': {'jwt':'private-fixture-token'}}, {'Authorization':'private-fixture-token'}])
+def test_uai5_login_accepts_portal_storage_without_any_cookie(token_fields):
+    from app.services.course.english.login_browser import authenticated_result
+    from app.services.course.english.uai import COURSES
+    state = {'cookies': [], 'origins': [{'origin': 'https://uai.unipus.cn', 'localStorage': [
+        {'name':'PORTAL_STATE_PERSISTENT', 'value':json.dumps(token_fields)}]}]}
+    assert storage_state(json.dumps(state)) == state
+    context = Mock()
+    context.storage_state.return_value = state
+    context.cookies.return_value = []
+    response = context.request.get.return_value
+    response.status = 200
+    response.body.return_value = json.dumps({'code':1, 'value':{'groups':{
+        'CLASS_COURSE':[{'instanceId':'course-v2:Unipus+English+2026','name':'English'}],
+        'PERSONAL':[{'instanceId':'course-v2:Unipus+English+2026','name':'duplicate'},{'instanceId':'personal-1','name':'Personal'}],
+        'EXPIRED':[{'instanceId':'expired-1','name':'Expired'}]}}}).encode()
+    result = authenticated_result(context, Mock(url='https://uai.unipus.cn/portal/'), 'unipus_ai')
+    assert result['courses'] == [{'id':'course-v2:Unipus+English+2026','name':'English'},{'id':'personal-1','name':'Personal'}]
+    assert json.loads(result['credential']) == state
+    assert context.request.get.call_args.args == (COURSES,)
+    assert context.request.get.call_args.kwargs['headers']['Authorization'] == 'private-fixture-token'
+    response.dispose.assert_called_once()
+
+
+def test_uai5_empty_bookshelf_finishes_login_but_missing_auth_does_not():
+    from app.services.course.english.login_browser import authenticated_result
+    context = Mock()
+    context.storage_state.return_value = {'cookies':[], 'origins':[]}
+    context.cookies.return_value = []
+    page = Mock(url='https://uai.unipus.cn/portal/')
+    assert authenticated_result(context, page, 'unipus_ai') is None
+    context.request.get.assert_not_called()
+    context.cookies.return_value = [{'name':'jwt','value':'fixture-token'}]
+    context.request.get.return_value.status = 200
+    context.request.get.return_value.body.return_value = b'{"code":1,"value":{"groups":{}}}'
+    # A cookie-based session remains supported; use a valid stored cookie shape.
+    context.storage_state.return_value = {'cookies':[{'name':'jwt','value':'fixture-token','domain':'uai.unipus.cn','path':'/'}], 'origins':[]}
+    assert authenticated_result(context, page, 'unipus_ai')['courses'] == []
+
+
+@pytest.mark.parametrize('value', ['not-json', '{"tokenInfo":{"jwt":"bad\\ntoken"}}', '{"Authorization":42}', '[]'])
+def test_uai5_malformed_portal_storage_cannot_replace_login(value):
+    from app.services.course.english.uai_auth import portal_token
+    state = {'cookies':[], 'origins':[{'origin':'https://uai.unipus.cn','localStorage':[{'name':'PORTAL_STATE_PERSISTENT','value':value}]}]}
+    assert portal_token(state) is None
+    with pytest.raises(PlatformError): storage_state(json.dumps(state))
+
+
+@pytest.mark.parametrize('origin', ['https://evil.example','https://uai.unipus.cn.evil.example','https://ucontent.unipus.cn'])
+def test_uai5_only_uses_portal_origin_token(origin):
+    from app.services.course.english.uai_auth import portal_token
+    assert portal_token({'origins':[{'origin':origin,'localStorage':[{'name':'PORTAL_STATE_PERSISTENT','value':'{"Authorization":"private-token"}'}]}]}) is None
+
+
+@pytest.mark.parametrize('status,payload', [(401, {}), (200, {'code':6001,'value':{'groups':{}}}), (200, {'code':1,'value':{'groups':[]}})])
+def test_uai5_failed_or_changed_bookshelf_is_not_success(status, payload):
+    from app.services.course.english.uai import courses
+    context = Mock()
+    context.cookies.return_value = [{'name':'jwt','value':'fixture-token'}]
+    response = context.request.get.return_value
+    response.status = status
+    response.body.return_value = json.dumps(payload).encode()
+    with pytest.raises(PlatformError): courses(context)
+    response.dispose.assert_called_once()

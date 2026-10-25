@@ -192,3 +192,11 @@ WE Learn扫码修复保留：官方回调至少等待五秒，短暂文档替换
 公开 Task1 已验证内部翻页、文字输入、提交确认、原生 Reset 状态完整流程，所有非 GET 请求拦截，仅证明课件操作链路，不代表真实账号进度验收。Lead-in 填写5个空后，官方实际拒绝提示“还有3题未完成”，该页另含3道录音；现在显示平台拒绝原因，与回执未知分开计数。et-recorder 与 et-talk 均明确提示本人录音要求，不当作只需访问的阅读页。
 
 Task2 的 ET 选择题以 `.wrapper > ol > li` 原生点击，独立题干和选项识别，使用原生 `chosen` 选择状态回读，不再漏报为零题；未命中已绑定课件答案时按既定 LocalCache→AI 链处理，未启用 AI 时仍不会猜答。
+
+## U校园5.0登录状态与书架
+
+官方门户将身份保存于同源 localStorage 的 `PORTAL_STATE_PERSISTENT.tokenInfo.jwt`（兼容同一对象的 Authorization）。读取该既有状态，不生成令牌；保留旧会话 jwt Cookie 读取。允许仅含该门户有效身份状态的 storage state，无须人为添加 Cookie。令牌只发送固定官方 HTTPS 书架接口，禁止跟随重定向，不返回前端。
+
+课程按当前门户 `/api/cmgt/course/my/bookshelf` 读取 `value.groups.CLASS_COURSE` 和 PERSONAL，班级优先去重，排除 EXPIRED；支持 course-v2 标识，仍不接受任意网址。有效响应的空书架也完成登录交接，页面明确显示暂无可用课程，不能把课程数量当作登录成功判据。课程接口失败或响应结构变化不会伪装成空课程成功。
+
+公开事实核对：官方 `/portal/` 引用 `res.unipus.cn/production/portal-platform/portal/static/js/main.f5f21752.js` 的认证存储辅助函数与 fetchMyBookshelf；社区 UnipusAI 的 course.rs 用相同书架分组结构补足旧首页空列表。只独立实现数据结构/接口事实，不复制 GPL 代码、签名生成或认证刷新逻辑。新回归包含仅本地存储、无Cookie、有升级弹窗遮挡时的完整登录交接，以及空书架/过期身份/跨域令牌拒绝。真实账号仍需验收。

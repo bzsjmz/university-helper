@@ -101,3 +101,22 @@ test('range requires explicit endpoints and sends one sequential range task', as
   expect(JSON.parse(call[1].body)).toMatchObject({ item: 'a', end_item: 'c', course: 'c' })
   expect(mocks.api.mock.calls.filter(([path]) => path.endsWith('/s/tasks'))).toHaveLength(1)
 })
+
+
+test('successful login with empty courses leaves login view and explains the empty bookshelf', async () => {
+  mocks.api.mockImplementation(async (path, options) => {
+    if (path === '/english-learning/tasks') return { tasks: [] }
+    if (path === '/english-learning/logins' && options?.method === 'POST') return { status: 'connected', session: { session_id: 'empty', courses: [] } }
+    return { logins: [] }
+  })
+  const user = userEvent.setup()
+  render(<EnglishLearning />)
+  await user.selectOptions(screen.getByLabelText('平台'), 'unipus_ai')
+  await user.type(screen.getByLabelText('账号'), 'fixture-user')
+  await user.type(screen.getByLabelText('密码'), 'fixture-password')
+  await user.click(screen.getByRole('button', { name: '登录并读取课程' }))
+  await screen.findByText(/登录成功，但平台未返回可用课程/)
+  expect(screen.queryByLabelText('密码')).not.toBeInTheDocument()
+  expect(screen.getByLabelText('课程')).toBeVisible()
+  expect(screen.getByRole('button', { name: '读取课程内容' })).toBeDisabled()
+})

@@ -10,7 +10,7 @@ from urllib.parse import urlsplit
 from .clients import PlatformError
 
 HOME = 'https://uai.unipus.cn/portal/'
-COURSES = 'https://uai.unipus.cn/api/cmgt/course/getHomeCourseListByStudent'
+COURSES = 'https://uai.unipus.cn/api/cmgt/course/my/bookshelf'
 
 
 def decorative_portal_resource(request):
@@ -26,17 +26,17 @@ def decorative_portal_resource(request):
 
 
 def course_id(value):
-    if not isinstance(value, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', value):
+    if not isinstance(value, str) or not re.fullmatch(r'[A-Za-z0-9_:+.\-]{1,256}', value):
         raise PlatformError('请选择 U校园 AI版账号下的课程；不再支持老版课程网址')
     return value
 
 
 def courses(context, page=None, *, include_groups=False):
-    cookies = context.cookies([HOME])
-    jwt = next((c['value'] for c in cookies if c['name'] == 'jwt'), '')
+    from .uai_auth import browser_token
+    jwt = browser_token(context)
     if not jwt:
-        return []
-    response = context.request.get(COURSES, headers={'Authorization': jwt, 'u-app-id': '39', 'u-platform': '2',
+        raise PlatformError('U校园登录状态尚未就绪，请完成官网登录')
+    response = context.request.get(COURSES, headers={'Authorization': jwt,
                                             'Referer': HOME, 'Origin': 'https://' + urlsplit(HOME).netloc},
                                    timeout=15000, max_redirects=0)
     try:
@@ -45,26 +45,37 @@ def courses(context, page=None, *, include_groups=False):
         raw = response.body()
         if len(raw) > 2_000_000:
             raise PlatformError('U校园 AI版课程列表过大')
-        data = json.loads(raw)
-        value = data.get('value')
-        if not isinstance(value, dict):
+        try:
+            data = json.loads(raw)
+        except (ValueError, TypeError):
+            raise PlatformError('U校园 AI版课程列表格式变化') from None
+        if not isinstance(data, dict) or data.get('code') != 1:
             raise PlatformError('U校园 AI版课程读取失败，请重新登录')
-        rows = value.get('courseList', [])
-        if not isinstance(rows, list):
+        value = data.get('value')
+        groups = value.get('groups') if isinstance(value, dict) else None
+        if not isinstance(groups, dict):
             raise PlatformError('U校园 AI版课程列表格式变化')
         result, seen = [], set()
-        for row in rows[:200]:
-            for entry in row.get('courseResourceList', [])[:200]:
+        # Official bookshelf: active class courses first, then personal study.
+        # Expired materials are deliberately not selectable.
+        for group in ('CLASS_COURSE', 'PERSONAL'):
+            rows = groups.get(group, [])
+            if not isinstance(rows, list):
+                raise PlatformError('U校园 AI版课程列表格式变化')
+            for entry in rows[:200]:
+                if not isinstance(entry, dict):
+                    continue
                 raw_id = entry.get('instanceId')
-                if not isinstance(raw_id, (str, int)) or not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', str(raw_id)):
+                if not isinstance(raw_id, (str, int)) or not re.fullmatch(r'[A-Za-z0-9_:+.\-]{1,256}', str(raw_id)):
                     continue
                 cid = str(raw_id)
-                if cid not in seen:
-                    seen.add(cid)
-                    record = {'id': cid, 'name': str(entry.get('name') or row.get('name') or 'U校园 AI课程')[:256]}
-                    if include_groups:
-                        record['group_name'] = str(row.get('name') or '')[:256]
-                    result.append(record)
+                if cid in seen:
+                    continue
+                seen.add(cid)
+                record = {'id': cid, 'name': str(entry.get('name') or 'U校园 AI课程')[:256]}
+                if include_groups:
+                    record['group_name'] = record['name']
+                result.append(record)
         return result
     finally:
         response.dispose()

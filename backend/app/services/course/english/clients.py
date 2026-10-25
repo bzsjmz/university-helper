@@ -60,7 +60,8 @@ def storage_state(raw):
             ):
                 raise ValueError()
             origins.append({'origin': origin['origin'], 'localStorage': entries})
-        if not cookies:
+        from .uai_auth import portal_token
+        if not cookies and not portal_token({'origins': origins}):
             raise ValueError()
         return {'cookies': cookies, 'origins': origins}
     except (ValueError, TypeError, KeyError, AttributeError):

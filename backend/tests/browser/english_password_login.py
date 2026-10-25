@@ -25,7 +25,7 @@ class BrowserLoginTest(unittest.TestCase):
         user_attrs = 'name="username"' if platform == 'welearn' else 'placeholder="请输入手机号、邮箱或用户名"'
         pass_attrs = 'name="password"' if platform == 'welearn' else 'placeholder="请输入密码"'
         login_label = '登录' if platform == 'welearn' else '登 录'
-        form = f'''<html><body><form onsubmit="event.preventDefault();document.cookie='sid=fixture-cookie;path=/;Secure';location.href='https://{host}{destination}'">
+        form = f'''<html><body><form onsubmit="event.preventDefault();document.cookie='sid=fixture-cookie;path=/;Secure';document.cookie='jwt=fixture-token;path=/;Secure';location.href='https://{host}{destination}'">
           <input {user_attrs} style="position:absolute;left:20px;top:20px">
           <input {pass_attrs} type="password" style="position:absolute;left:20px;top:60px">
           {extra}<button style="position:absolute;left:20px;top:150px;width:160px;height:30px">{login_label}</button>
@@ -73,6 +73,44 @@ class BrowserLoginTest(unittest.TestCase):
             self.assertNotIn('fixture-password', json.dumps(reply))
         self.assertIn('fixture-cookie', replies[-1]['credential'])
         return replies
+
+    def test_uai5_portal_storage_hands_off_courses_even_with_upgrade_overlay(self):
+        for entries in ([{'instanceId':'course-v2:Unipus+English+2026','name':'My English'}], []):
+            with self.subTest(empty=not entries), real_playwright() as p:
+                browser = p.chromium.launch(headless=True, chromium_sandbox=True)
+                try:
+                    @contextmanager
+                    def fixture():
+                        def new_context(**kwargs):
+                            context = browser.new_context(**kwargs)
+                            def route(r):
+                                if '/sso/login' in r.request.url:
+                                    body = '''<form onsubmit="event.preventDefault();localStorage.setItem('PORTAL_STATE_PERSISTENT',JSON.stringify({tokenInfo:{jwt:'private-fixture-token'}}));location.href='/portal/'">
+                                      <input placeholder="请输入手机号、邮箱或用户名"><input type="password"><button>登 录</button></form>'''
+                                else:
+                                    body = '<h1>我的学习</h1><div role="dialog">U校园全新升级公告<button>立即体验</button></div>'
+                                r.fulfill(content_type='text/html; charset=utf-8', body=body)
+                            context.on('page', lambda page: page.route('**/*', route))
+                            return context
+                        yield types.SimpleNamespace(chromium=types.SimpleNamespace(launch=lambda **kw:types.SimpleNamespace(new_context=new_context,close=lambda:None)))
+                    output = io.StringIO()
+                    response = types.SimpleNamespace(status=200, body=lambda:json.dumps({'code':1,'value':{'groups':{'CLASS_COURSE':entries}}}).encode(), dispose=lambda:None)
+                    def api_get(client, url, **kwargs):
+                        self.assertEqual(url, 'https://uai.unipus.cn/api/cmgt/course/my/bookshelf')
+                        self.assertEqual(kwargs['headers']['Authorization'], 'private-fixture-token')
+                        self.assertEqual(kwargs['max_redirects'], 0)
+                        return response
+                    with patch('playwright.sync_api.sync_playwright', fixture), \
+                         patch('playwright.sync_api.APIRequestContext.get', api_get), redirect_stdout(output):
+                        login_browser({'platform':'unipus_ai','username':'fixture-user','password':'fixture-password'})
+                    replies = [json.loads(line) for line in output.getvalue().splitlines()]
+                    self.assertEqual(len(replies), 1, replies)
+                    self.assertEqual(replies[0].get('status'), 'connected', replies[0])
+                    state = json.loads(replies[0]['credential'])
+                    self.assertEqual(state['cookies'], [])
+                    self.assertEqual(len(replies[0]['courses']), len(entries))
+                finally:
+                    browser.close()
 
     def test_blank_capture_is_suppressed_and_explicit_reload_recovers(self):
         with real_playwright() as p:
