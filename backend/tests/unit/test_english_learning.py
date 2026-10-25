@@ -249,7 +249,7 @@ def test_uai_courses_use_existing_browser_jwt_only_on_fixed_official_origin():
     context.request.get.return_value = response
     assert courses(context) == [{'id': 'ai-1', 'name': 'AI English'}]
     context.request.get.assert_called_once_with(COURSES, headers={'Authorization': 'private-jwt', 'u-app-id': '39', 'u-platform': '2',
-            'Referer': 'https://uai.unipus.cn/', 'Origin': 'https://uai.unipus.cn'}, timeout=15000, max_redirects=0)
+            'Referer': 'https://ucloud.unipus.cn/', 'Origin': 'https://ucloud.unipus.cn'}, timeout=15000, max_redirects=0)
     response.dispose.assert_called_once()
     context.cookies.return_value = []
     assert courses(context) == []
@@ -315,3 +315,13 @@ def test_portal_light_loading_keeps_authentication_and_course_media():
     request.frame.url = 'https://uai.unipus.cn/'
     request.resource_type = 'script'
     assert not decorative_portal_resource(request)
+
+
+def test_ucloud_proxy_login_keeps_captcha_and_fonts_but_portal_cover_art_is_blocked():
+    from app.services.course.english.uai import decorative_portal_resource
+    request = Mock(resource_type='image', frame=Mock(url='https://ucloud.unipus.cn/sso/login?service=official'))
+    assert not decorative_portal_resource(request)
+    request.resource_type = 'font'
+    assert not decorative_portal_resource(request)
+    request.frame.url = 'https://ucloud.unipus.cn/'
+    assert decorative_portal_resource(request)

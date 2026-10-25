@@ -15,7 +15,7 @@ from app.services.course.english.login_view import blank_png, login_picture
 
 class BrowserLoginTest(unittest.TestCase):
     def run_flow(self, platform, commands=(), *, captcha=False, agreement=False):
-        host = 'welearn.sflep.com' if platform == 'welearn' else 'uai.unipus.cn'
+        host = 'welearn.sflep.com' if platform == 'welearn' else 'ucloud.unipus.cn'
         destination = '/student/index.aspx' if platform == 'welearn' else '/home'
         extra = ''
         if captcha:
@@ -57,7 +57,7 @@ class BrowserLoginTest(unittest.TestCase):
                 patch('app.services.course.english.login_handoff.sys.stdin', fake_stdin), \
                 patch('app.services.course.english.login_browser.Welearn.courses',
                       return_value=[{'id': '1', 'name': 'My English'}]), \
-                patch('app.services.course.english.uai.courses', return_value=[{'id': 'ai-1', 'name': 'My English'}]), redirect_stdout(output):
+                patch('app.services.course.english.uai.courses', side_effect=lambda context, page: ([{'id': 'ai-1', 'name': 'My English'}] if any(c['name'] == 'sid' for c in context.cookies()) else [])), redirect_stdout(output):
             login_browser(request)
         self.assertNotIn('password', request)
         replies = [json.loads(line) for line in output.getvalue().splitlines()]
@@ -154,6 +154,7 @@ class BrowserLoginTest(unittest.TestCase):
                     # Complete in the opener while the QR popup still exists.
                     context.add_cookies([{'name':'sid','value':'fixture-cookie','url':'https://welearn.sflep.com'}])
                     context.pages[0].goto('https://welearn.sflep.com/student/index.aspx')
+                    page.close()  # Real OAuth callbacks can close the QR popup.
                 return b'{"action":"refresh"}\n'
         output = io.StringIO()
         with patch('playwright.sync_api.sync_playwright', fixture), \
@@ -225,6 +226,8 @@ class BrowserLoginTest(unittest.TestCase):
                 handoff = WechatHandoff()
                 handoff.observe(page, b'qr', 'waiting')
                 self.assertFalse(handoff.observe(page, None, None))
+                self.assertFalse(handoff.observe(page, None, None))
+                handoff.pending_since -= 6
                 self.assertTrue(handoff.observe(page, None, None))
                 page = handoff.resume(context, page)
                 self.assertIn('welearn.sflep.com/user/prelogin.aspx', page.url)

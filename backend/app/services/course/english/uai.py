@@ -9,7 +9,7 @@ from urllib.parse import urlsplit
 
 from .clients import PlatformError
 
-HOME = 'https://uai.unipus.cn/'
+HOME = 'https://ucloud.unipus.cn/'
 COURSES = 'https://uai.unipus.cn/api/cmgt/course/getHomeCourseListByStudent'
 
 
@@ -17,8 +17,10 @@ def decorative_portal_resource(request):
     # The portal's cover art/media can exhaust a small headless renderer. Keep
     # authentication forms and actual ucontent exercises/media unaffected.
     try:
+        frame_url = urlsplit(request.frame.url)
         return (request.resource_type in ('image', 'media', 'font')
-                and urlsplit(request.frame.url).hostname == 'uai.unipus.cn')
+                and frame_url.hostname in ('ucloud.unipus.cn', 'uai.unipus.cn')
+                and frame_url.path != '/sso' and not frame_url.path.startswith('/sso/'))
     except Exception:
         return False
 
@@ -35,7 +37,7 @@ def courses(context, page=None, *, include_groups=False):
     if not jwt:
         return []
     response = context.request.get(COURSES, headers={'Authorization': jwt, 'u-app-id': '39', 'u-platform': '2',
-                                            'Referer': HOME, 'Origin': 'https://uai.unipus.cn'},
+                                            'Referer': HOME, 'Origin': HOME.rstrip('/')},
                                    timeout=15000, max_redirects=0)
     try:
         if response.status != 200:
@@ -113,7 +115,7 @@ def open_course(context, page, cid):
     target = opened[-1] if opened else page
     target.wait_for_load_state('domcontentloaded')
     host = urlsplit(target.url).hostname
-    if host not in ('uai.unipus.cn', 'ucontent.unipus.cn'):
+    if host not in ('ucloud.unipus.cn', 'uai.unipus.cn', 'ucontent.unipus.cn'):
         raise PlatformError('U校园 AI版课程打开失败，请在官网核对登录状态')
     # Expand only directory switches; never an exercise confirmation/submit.
     for _ in range(80):

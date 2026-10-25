@@ -36,23 +36,30 @@ class WechatHandoff:
         self.seen_qr = False
         self.blank_reads = 0
         self.resumed = False
+        self.pending_since = None
 
     def observe(self, page, picture, qr_status):
         if qr_status is not None:
             self.seen_qr = True
             self.blank_reads = 0
+            self.pending_since = None
             return False
         if not self.seen_qr or self.resumed:
             return False
         parsed = urlsplit(page.url)
+        # Let the official callback redeem its code before navigating away.
+        # Only a stable callback without a QR/form gets one bounded fallback.
+        if self.pending_since is None:
+            self.pending_since = time.monotonic()
+        settled = time.monotonic() - self.pending_since >= 5
         if picture is None:
             self.blank_reads += 1
-            return self.blank_reads >= 2
+            return settled and self.blank_reads >= 2
         self.blank_reads = 0
         # Some official callbacks stop at a landing/transfer page rather than
         # redeeming the original application's SSO session. Never submit forms
         # or try to complete account binding/registration here.
-        return (parsed.scheme == 'https' and parsed.hostname in ('sso.sflep.com', 'welearn.sflep.com')
+        return (settled and parsed.scheme == 'https' and parsed.hostname in ('sso.sflep.com', 'welearn.sflep.com')
                 and not any(part in parsed.path.lower() for part in ('bind', 'register'))
                 and page.locator('input:visible').count() == 0)
 

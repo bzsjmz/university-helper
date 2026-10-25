@@ -79,7 +79,7 @@ export default function EnglishLearning() {
     <div className="mx-auto max-w-3xl space-y-6">
       <div>
         <h1 className="text-2xl font-bold">英语平台试用</h1>
-        <p className="mt-2 text-text-muted">WE Learn · U校园 AI版</p>
+        <p className="mt-2 text-text-muted">WE Learn · U校园 5.0（AI版）</p>
       </div>
       <div className="rounded-xl border border-border bg-surface p-4 text-sm leading-7">
         <p>支持所选范围内各内容当前页的自动答题/作业保存，也可切换为限时学习。WE Learn 优先读取课件自带答案，其次查缓存，最后才按选项使用 AI；遇到缺失答案或不支持的题型会停止提交。</p>
@@ -141,7 +141,7 @@ export default function EnglishLearning() {
         {tasks.length === 0 && <p>暂无任务</p>}
         {tasks.map((task) => (
           <article key={task.id} className="rounded-xl border border-border p-4">
-            <p>{task.platform === 'welearn' ? 'WE Learn' : 'U校园 AI版'} · {task.course_name}</p>
+            <p>{task.platform === 'welearn' ? 'WE Learn' : 'U校园 5.0（AI版）'} · {task.course_name}</p>
             <p>{task.item_name} · {task.mode === 'answer' ? '自动答题' : '限时学习'} · {task.total_items > 1 ? '每节 ' : ''}{task.seconds} 秒 · {statuses[task.status] || task.status}</p>
             <p className="mt-2 text-sm text-text-muted">{task.message}</p>
             {task.total_items > 1 && <p className="text-sm">进度 {task.completed_items}/{task.total_items} · 当前：{task.current_item}</p>}

@@ -38,7 +38,7 @@ def storage_state(raw):
         origins = []
         for origin in state.get('origins', []):
             parsed = urlsplit(origin['origin'])
-            if (parsed.scheme != 'https' or parsed.hostname not in ('uai.unipus.cn', 'ucontent.unipus.cn')
+            if (parsed.scheme != 'https' or parsed.hostname not in ('ucloud.unipus.cn', 'uai.unipus.cn', 'ucontent.unipus.cn')
                     or parsed.port not in (None, 443) or parsed.username or parsed.password
                     or parsed.path or parsed.query or parsed.fragment):
                 raise ValueError()

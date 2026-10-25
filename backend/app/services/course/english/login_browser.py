@@ -8,13 +8,15 @@ import json
 import time
 from urllib.parse import urlsplit
 
+import requests
+
 from .clients import PlatformError, Welearn, storage_state
 from .login_view import login_picture
 from .login_handoff import WechatHandoff, read_login_command
 
 LOGIN_URLS = {
     'welearn': 'https://welearn.sflep.com/user/prelogin.aspx?loginret=https%3A%2F%2Fwelearn.sflep.com%2Fstudent%2Findex.aspx',
-    'unipus_ai': 'https://sso.unipus.cn/sso/login?service=https%3A%2F%2Fuai.unipus.cn',
+    'unipus_ai': 'https://ucloud.unipus.cn/sso/login?service=https%3A%2F%2Fucloud.unipus.cn',
 }
 WIDTH, HEIGHT = 1000, 760
 
@@ -84,12 +86,12 @@ def authenticated_result(context, page, platform):
         client = Welearn(credential)
         try:
             courses = client.courses()
-        except PlatformError:
+        except (PlatformError, requests.RequestException):
             return None
         finally:
             client.session.close()
         return {'credential': credential, 'courses': courses}
-    if platform != 'unipus_ai' or parsed.hostname != 'uai.unipus.cn':
+    if platform != 'unipus_ai' or parsed.hostname not in ('ucloud.unipus.cn', 'uai.unipus.cn'):
         return None
     from .uai import courses as uai_courses
     listed = uai_courses(context, page)
@@ -99,7 +101,7 @@ def authenticated_result(context, page, platform):
     state['cookies'] = [c for c in state['cookies'] if c['domain'].lstrip('.') == 'unipus.cn'
                         or c['domain'].endswith('.unipus.cn')]
     state['origins'] = [o for o in state['origins'] if o['origin'] in
-                        ('https://uai.unipus.cn', 'https://ucontent.unipus.cn')]
+                        ('https://ucloud.unipus.cn', 'https://uai.unipus.cn', 'https://ucontent.unipus.cn')]
     return {'credential': json.dumps(storage_state(json.dumps(state))), 'courses': listed}
 
 
@@ -148,6 +150,16 @@ def operate(page, command):
 
 
 def login_browser(request):
+    from playwright.sync_api import Error, TimeoutError
+    try:
+        _login_browser(request)
+    except TimeoutError:
+        print(json.dumps({'ok': False, 'error_code': 'platform_timeout'}), flush=True)
+    except Error:
+        print(json.dumps({'ok': False, 'error_code': 'browser_navigation'}), flush=True)
+
+
+def _login_browser(request):
     from playwright.sync_api import Error, sync_playwright
     platform = request['platform']
     method = request.get('method', 'password')
@@ -184,6 +196,9 @@ def login_browser(request):
                     visible = [b for b in buttons if b.is_visible() and b.is_enabled()]
                     if len(visible) == 1:
                         visible[0].click()
+            live = [tab for tab in context.pages if not tab.is_closed()]
+            if live:
+                page = live[-1]
             page.wait_for_timeout(1500)
             deadline = time.monotonic() + 600
             while time.monotonic() < deadline:
@@ -212,8 +227,17 @@ def login_browser(request):
                         image = base64.b64encode(picture).decode() if picture and result is None else ''
                         break
                     except Error:
+                        # OAuth can close/replace a tab while captures run. Keep the
+                        # private context and wait for its surviving official tab.
+                        live = [tab for tab in context.pages if not tab.is_closed()
+                                and allowed_login_url(tab.url, platform, method)]
+                        if not live:
+                            raise PlatformError('登录浏览器已关闭，请重新登录') from None
+                        page = live[-1]
                         if attempt == 2:
-                            raise PlatformError('登录页面暂未就绪，请重新登录') from None
+                            result, image, display_mode, qr_status = None, '', 'page', None
+                            returning = method == 'wechat' and handoff.seen_qr
+                            break
                         page.wait_for_timeout(400)
                 if result is not None:
                     print(json.dumps({'ok': True, 'status': 'connected', **result}), flush=True)
@@ -224,7 +248,7 @@ def login_browser(request):
                                'scanned': '扫码成功，请在手机微信中确认登录。',
                                'expired': '二维码已过期，请点击“刷新二维码”重新获取。'}.get(qr_status,
                         '正在等待微信授权返回。未绑定的微信请先到 WE Learn 官网完成绑定。')
-                if platform == 'unipus_ai' and urlsplit(page.url).hostname == 'uai.unipus.cn':
+                if platform == 'unipus_ai' and urlsplit(page.url).hostname in ('ucloud.unipus.cn', 'uai.unipus.cn'):
                     message = '正在连接 U校园 AI版并读取已开通的教程。'
                 if returning:
                     message = '微信授权已离开扫码页，正在连接 WE Learn 并读取课程，请稍候。'
@@ -239,7 +263,19 @@ def login_browser(request):
                 command = json.loads(raw)
                 command['platform'] = platform
                 command['method'] = method
-                operate(page, command)
-                page.wait_for_timeout(500)
+                try:
+                    operate(page, command)
+                    live = [tab for tab in context.pages if not tab.is_closed()]
+                    if live:
+                        page = live[-1]
+                    page.wait_for_timeout(500)
+                except Error:
+                    # An action may complete by closing its own callback tab.
+                    # Never replay it; inspect the surviving tab on the next read.
+                    live = [tab for tab in context.pages if not tab.is_closed()
+                            and allowed_login_url(tab.url, platform, method)]
+                    if not live:
+                        raise
+                    page = live[-1]
         finally:
             browser.close()

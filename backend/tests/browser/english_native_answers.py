@@ -75,7 +75,7 @@ class NativeBrowserTest(unittest.TestCase):
                 try:
                     context = browser.new_context()
                     def route(r):
-                        if 'uai.unipus.cn' in r.request.url:
+                        if 'ucloud.unipus.cn' in r.request.url:
                             body = '<button onclick="document.querySelector(\'a\').style.display=\'block\'">Class English</button><a style="display:none" href="https://ucontent.unipus.cn/_explorationpc_default/pc.html">AI English</a>'
                         else:
                             body = '<div data-group-id="leaf1" onclick="document.querySelector(\'.question\').hidden=false">Lesson 1</div><div class="question" hidden><h3 class="stem">Fill the word</h3><input type="text"></div><button onclick="document.querySelector(\'.result\').textContent=\'保存成功\'">保存</button><div class="result"></div>'

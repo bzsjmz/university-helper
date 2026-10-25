@@ -129,7 +129,7 @@ export default function EnglishLogin({ onConnected }) {
       <label className="block">平台
         <select className={field} value={platform} disabled={busy} onChange={(e) => {
           setPlatform(e.target.value); setPassword(''); setCredential(''); setUrl(''); setMessage('')
-        }}><option value="welearn">WE Learn</option><option value="unipus_ai">U校园 AI版</option></select>
+        }}><option value="welearn">WE Learn</option><option value="unipus_ai">U校园 5.0（AI版）</option></select>
       </label>
       <form className="space-y-4" onSubmit={loginWithPassword}>
         <label className="block">账号

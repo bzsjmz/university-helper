@@ -216,7 +216,9 @@ sys.stdin.buffer.readline()
     assert not manager.processes and not manager.logins.jobs
 
 
-def test_wechat_blank_callback_resumes_fixed_course_entry_once_without_replaying_code():
+def test_wechat_blank_callback_resumes_fixed_course_entry_once_without_replaying_code(monkeypatch):
+    clock = [0.0]
+    monkeypatch.setattr("app.services.course.english.login_handoff.time.monotonic", lambda: clock[0])
     from app.services.course.english.login_handoff import WechatHandoff
     from app.services.course.english.login_browser import LOGIN_URLS
     handoff = WechatHandoff()
@@ -225,6 +227,8 @@ def test_wechat_blank_callback_resumes_fixed_course_entry_once_without_replaying
     assert not handoff.observe(page, None, None)  # Never resume an initial blank login.
     assert not handoff.observe(page, b'qr', 'waiting')
     assert not handoff.observe(page, None, None)
+    assert not handoff.observe(page, None, None)  # Do not interrupt code redemption.
+    clock[0] = 6
     assert handoff.observe(page, None, None)
     assert handoff.resume(Mock(), page) is page
     page.goto.assert_called_once_with(LOGIN_URLS['welearn'], wait_until='domcontentloaded', timeout=20000)
@@ -242,3 +246,47 @@ def test_wechat_handoff_does_not_interfere_with_binding_or_password_forms():
     page.url = 'https://sso.sflep.com/idsvr/login.html'
     page.locator.return_value.count.return_value = 2
     assert not handoff.observe(page, b'form', None)
+
+
+def test_ucloud_5_login_entry_is_not_legacy_sso_service():
+    from app.services.course.english.login_browser import LOGIN_URLS
+    from app.services.course.english.uai import HOME
+    assert HOME == 'https://ucloud.unipus.cn/'
+    assert LOGIN_URLS['unipus_ai'].startswith('https://ucloud.unipus.cn/sso/login?')
+    assert 'uai.unipus.cn' not in LOGIN_URLS['unipus_ai']
+
+
+@pytest.mark.parametrize('code', ['platform_timeout', 'browser_navigation', 'worker_response_timeout'])
+def test_login_failure_reports_safe_cause_instead_of_claiming_expiry(manager, monkeypatch, code):
+    monkeypatch.setattr(manager, '_spawn', fixture_worker)
+    monkeypatch.setattr(manager.logins, '_read', lambda *args: {'ok': False, 'error_code': code,
+        'message': 'private-token=never-echo'})
+    result = manager.logins.start_wechat('alice')
+    assert result['status'] == 'failed'
+    assert result['error_code'] == code
+    assert '过期' not in result['message'] or '不代表二维码过期' in result['message']
+    assert 'private-token' not in json.dumps(result)
+    assert not manager.processes
+
+
+def test_slow_oauth_poll_keeps_worker_and_does_not_enqueue_duplicate_command(manager, monkeypatch):
+    process = Mock()
+    process.poll.return_value = None
+    monkeypatch.setattr(manager, '_spawn', lambda **kwargs: process)
+    replies = iter([PlatformError('登录页面未能正常响应，请重新登录'),
+                    {'ok': True, 'status': 'connected', 'credential': 'sid=fixture',
+                     'courses': [{'id': 'c', 'name': 'English'}]}])
+    def read(*args):
+        value = next(replies)
+        if isinstance(value, Exception):
+            raise value
+        return value
+    monkeypatch.setattr(manager.logins, '_read', read)
+    pending = manager.logins.start_wechat('alice')
+    assert pending['status'] == 'verification' and pending['view_state'] == 'loading'
+    assert manager.logins.jobs[pending['login_id']]['process'] is process
+    process.wait.assert_not_called()
+    result = manager.logins.exchange('alice', pending['login_id'])
+    assert result['status'] == 'connected'
+    assert process.stdin.write.call_count == 1  # Read the outstanding reply, no second refresh.
+    assert not manager.processes
