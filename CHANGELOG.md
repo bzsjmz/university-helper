@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- New Chaoxing tasks query the existing anonymous GO answer bank before AI.
+  Add a local/free-bank preset that removes the paid AI fallback. Existing
+  saved task configurations and restart scopes remain unchanged.
 - Reject explicit non-answers such as “无法确定” when querying, caching, reading
   old cache entries, and filling Chaoxing assessments. Unanswered written
   questions remain saved even on chapter retries instead of being submitted.

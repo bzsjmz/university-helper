@@ -41,8 +41,22 @@ test('another account can start while account A runs, without resending credenti
   await user.click(start)
   await waitFor(() => expect(mocks.api).toHaveBeenCalledWith('/learning-accounts/b/tasks', expect.any(Object)))
   const options = mocks.api.mock.calls.find(([path]) => path === '/learning-accounts/b/tasks')[1]
-  expect(JSON.parse(options.body)).toMatchObject({ course_ids: ['course-b'], speed: 1.5, concurrency: 2, tiku_config: { provider: 'LocalCache,AI' } })
+  expect(JSON.parse(options.body)).toMatchObject({ course_ids: ['course-b'], speed: 1.5, concurrency: 2, tiku_config: { provider: 'LocalCache,TikuGo,AI' } })
   expect(options.body).not.toMatch(/username|password/)
+})
+
+test('free-bank preset removes paid AI fallback from the actual task request', async () => {
+  const user = userEvent.setup()
+  render(<MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}><ManagedChaoxing /></MemoryRouter>)
+  await user.click(await screen.findByRole('button', { name: /账号乙 ·/ }))
+  await user.click(screen.getByRole('button', { name: '连接并读取课程' }))
+  await user.click(await screen.findByRole('button', { name: '选择 乙的课程' }))
+  await user.click(screen.getByText('答题与题库设置（高级）'))
+  await user.click(screen.getByRole('button', { name: '仅本地和免费题库' }))
+  await user.click(screen.getByRole('button', { name: '为所选账号启动任务' }))
+  await waitFor(() => expect(mocks.api).toHaveBeenCalledWith('/learning-accounts/b/tasks', expect.any(Object)))
+  const options = mocks.api.mock.calls.find(([path]) => path === '/learning-accounts/b/tasks')[1]
+  expect(JSON.parse(options.body).tiku_config.provider).toBe('LocalCache,TikuGo')
 })
 
 test('late course response from A is ignored after selecting B', async () => {

@@ -405,6 +405,12 @@ source in `tiku_config.provider`; the Fanya page labels this field **题库来�
 
 ### Fallback chain (多题库回退)
 
+New tasks default to `LocalCache,TikuGo,AI`: consult the cache and anonymous GO
+bank before making a paid AI request. The local/free-bank preset removes AI.
+Restarts retain their saved configuration. Endpoint availability does not prove
+coverage or correctness. Yanxi/Like require the user's own token. Xingye needs
+a personal interface configuration and is not currently integrated.
+
 `provider` also takes an ordered, comma-separated list. The worker tries each
 provider in turn and moves to the next one when a provider has no answer or
 returns one that doesn't match the question type. Providers that can't start,
