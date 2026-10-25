@@ -8,6 +8,7 @@ import requests
 from loguru import logger
 
 from .answer_check import cut
+from .answer_quality import is_usable_answer, has_unanswered_text
 from .decode import decode_questions_info
 from .exceptions import MaxRetryExceeded
 from . import query_control as control
@@ -152,6 +153,8 @@ class QuizAnswerProcessor:
         if query_delay:
             control.sleep(query_delay)
         res = self.tiku.query(q)
+        if not is_usable_answer(res):
+            res = None
         answer = ""
         if not res:
             answer = random_answer(q, q["options"])
@@ -333,7 +336,7 @@ class ChaoxingQuizService:
         processor = QuizAnswerProcessor(self.tiku, self.kwargs)
         cover_rate = processor.process_questions(questions, origin_html_content)
 
-        if self.tiku.get_submit_params() == "1":
+        if self.tiku.get_submit_params() == "1" or has_unanswered_text(questions["questions"]):
             questions["pyFlag"] = "1"
         elif cover_rate >= self.tiku.COVER_RATE * 100 or self.rollback_times >= 1:
             questions["pyFlag"] = ""

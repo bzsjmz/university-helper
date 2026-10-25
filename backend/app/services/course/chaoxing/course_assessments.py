@@ -12,6 +12,7 @@ from urllib.parse import parse_qs, quote, urlencode, urljoin, urlsplit
 from bs4 import BeautifulSoup
 
 from . import query_control as control
+from .answer_quality import is_usable_answer
 from .decode import FontDecoder, _extract_title
 
 HOST = "https://mooc1-api.chaoxing.com"
@@ -201,7 +202,7 @@ def parse_paper(html, url, kind, course, expected_count=None):
 def answer_fields(question, response, tiku, kind):
     """Match exact text/letters; reject ambiguous matches and missing blanks."""
     text = str(response or '').strip()
-    if not text:
+    if not is_usable_answer(text):
         return None
     qid, code = question['id'], question['code']
     if code in ('0', '1'):

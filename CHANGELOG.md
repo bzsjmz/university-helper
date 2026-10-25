@@ -6,6 +6,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Reject explicit non-answers such as “无法确定” when querying, caching, reading
+  old cache entries, and filling Chaoxing assessments. Unanswered written
+  questions remain saved even on chapter retries instead of being submitted.
+- Stop encrypted-font question processing when the reference map is missing or
+  incomplete; support either quote style in embedded font data. Add a dedicated
+  short-answer prompt. These checks do not verify answer correctness or restore
+  the missing font reference data; ordinary cached answers remain unverified.
+
 ## [1.5.0] - 2026-09-27
 
 ### Added

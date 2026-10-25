@@ -12,6 +12,7 @@ from pathlib import Path
 
 from loguru import logger
 from .query_control import acquired
+from .answer_quality import is_usable_answer
 
 # Persist the answer cache under a writable path. In production the container
 # runs with a read-only rootfs (docker-compose.server.yml: read_only: true) and
@@ -202,9 +203,12 @@ class CacheDAO:
         # Serve from the in-memory snapshot (loaded once per file path) so a quiz
         # of N questions does O(1) disk reads instead of O(N) full re-parses.
         with self._lock:
-            return self._state["snapshot"].get(question)
+            answer = self._state["snapshot"].get(question)
+            return answer if is_usable_answer(answer) else None
 
     def add_cache(self, question: str, answer: str) -> None:
+        if not is_usable_answer(answer):
+            return
         # Write through: update the shared snapshot AND persist to disk so a
         # freshly constructed CacheDAO (one per question in Tiku.query) sees it.
         with self._lock:

@@ -15,7 +15,7 @@ class FontDecoder:
     """
 
     # 正则表达式常量
-    FONT_BASE64_PATTERN = r"base64,([\w\W]+?)\'"
+    FONT_BASE64_PATTERN = r"base64,([A-Za-z0-9+/=\s]+)[\"']"
     FONT_DATA_URL_PREFIX = "data:application/font-ttf;charset=utf-8;base64,"
 
     def __init__(self, html_content: str | None = None):
@@ -48,6 +48,8 @@ class FontDecoder:
                 raise FontDecodeError("无法从样式标签中提取字体数据")
 
             font_base64 = match.group(1)
+            if not cxfont.fonthash_dao.hash_map:
+                raise FontDecodeError("缺少字体映射表，停止加密题目答题")
             font_data_url = self.FONT_DATA_URL_PREFIX + font_base64
             self.__font_map = cxfont.font2map(font_data_url)
         except Exception as e:

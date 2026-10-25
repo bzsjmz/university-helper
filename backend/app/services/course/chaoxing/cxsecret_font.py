@@ -121,10 +121,8 @@ class FontHashDAO:
 # NOTE (audit F14): the data file resource/font_map_table.json (the font-hash ->
 # original-character mapping table) is NOT shipped in this repository and is not
 # generated/downloaded at build or startup. When it is absent, FontHashDAO falls
-# back to EMPTY char_map/hash_map below, which means decrypt() cannot reverse
-# Chaoxing's encrypted (anti-scrape) fonts and instead passes the garbled
-# characters through unchanged. This is a documented, known limitation rather
-# than a crash: encrypted-font question stems will appear garbled.
+# back to EMPTY char_map/hash_map below. decrypt() rejects any glyph it cannot
+# decode so encrypted questions cannot be sent to providers as garbled text.
 #
 # To enable encrypted-font decoding, place a valid font_map_table.json under a
 # "resource/" directory resolvable from the process CWD (see resource_path()).
@@ -132,7 +130,7 @@ try:
     fonthash_dao = FontHashDAO()
 except Exception as e:
     logger.warning(
-        "初始化字体哈希数据失败，加密字体解码功能将退化为原样返回 " f"(缺少 resource/font_map_table.json) - {e}"
+        "初始化字体哈希数据失败，加密题目将停止答题 " f"(缺少 resource/font_map_table.json) - {e}"
     )
     fonthash_dao = FontHashDAO.__new__(FontHashDAO)
     fonthash_dao.char_map = {}
@@ -233,6 +231,8 @@ def decrypt(dst_fontmap: dict[str, str], encrypted_text: str) -> str:
                     continue
                 except (ValueError, IndexError):
                     pass
+
+            raise FontDecodeError("加密字体映射缺失或不完整，停止答题，需人工核对")
 
         # 如果无法解密，则保留原字符
         result.append(char)

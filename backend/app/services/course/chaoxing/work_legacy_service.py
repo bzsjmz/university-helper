@@ -13,6 +13,7 @@ from .answer import Tiku
 from .answer_check import cut
 from .constants import StudyResult
 from .decode import decode_questions_info
+from .answer_quality import is_usable_answer, has_unanswered_text
 from .exceptions import MaxRetryExceeded
 
 # API URL constants
@@ -197,6 +198,8 @@ class ChaoxingWorkLegacyService:
         if query_delay:
             control.sleep(query_delay)
         res = self.tiku.query(q)
+        if not is_usable_answer(res):
+            res = None
         answer = ""
 
         def _multi_cut_with_context(ans):
@@ -381,7 +384,7 @@ class ChaoxingWorkLegacyService:
         logger.info(f"章节检测题库覆盖率： {cover_rate:.0f}%")
 
         # 提交模式
-        if self.tiku.get_submit_params() == "1":
+        if self.tiku.get_submit_params() == "1" or has_unanswered_text(questions["questions"]):
             questions["pyFlag"] = "1"
         elif cover_rate >= self.tiku.COVER_RATE * 100 or self.rollback_times >= 1:
             questions["pyFlag"] = ""

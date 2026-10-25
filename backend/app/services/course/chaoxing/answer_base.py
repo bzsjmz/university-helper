@@ -7,6 +7,7 @@ from loguru import logger
 
 from .answer_cache import CacheDAO
 from .answer_check import check_answer
+from .answer_quality import is_usable_answer
 from .answer_utils import _apply_ocr_to_title_if_needed
 from .query_control import bounded_query, check_control, provider_scope, QueryControlError, ProviderUnavailable
 
@@ -156,7 +157,7 @@ class Tiku:
                 logger.info(f"从缓存中获取答案：{q_info['title']} -> {answer}")
                 return answer.strip()
             answer = self._query(q_info)
-            if answer:
+            if is_usable_answer(answer):
                 answer = answer.strip()
                 logger.info(f"从{self.name}获取答案：{q_info['title']} -> {answer}")
 
@@ -388,7 +389,7 @@ class TikuFallback(Tiku):
                 return cached.strip()
 
             answer = self._query(q_info)
-            if answer:
+            if is_usable_answer(answer):
                 answer = answer.strip()
                 logger.info(f"从{self.name}获取答案：{q_info['title']} -> {answer}")
                 cache_dao.add_question_cache(q_info, answer)
@@ -445,7 +446,7 @@ class TikuFallback(Tiku):
             except Exception as e:
                 logger.exception(f"{self.name} 查询时 {provider.name} 异常: {e}")
                 continue
-            if not answer:
+            if not is_usable_answer(answer):
                 logger.info(f"{provider.name} 未命中，回退到下一个题库")
                 continue
             answer = answer.strip()
