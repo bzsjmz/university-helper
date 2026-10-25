@@ -89,6 +89,8 @@ def fake_page(monkeypatch, *, missing=False, unsupported=0, submit=True, receipt
     monkeypatch.setattr(forms, 'fill_question', Mock(return_value=True))
     monkeypatch.setattr(forms, 'verify_question', Mock(return_value=True))
     action = Mock()
+    frame.locator.return_value.count.return_value = 0
+    frame.locator.return_value.all_text_contents.return_value = []
     frame.locator.return_value.filter.return_value.count.return_value = 0
     monkeypatch.setattr(forms, 'button', lambda f, names: action)
     frame.evaluate.side_effect = ['', receipt]
@@ -133,6 +135,8 @@ def test_post_fill_recheck_failure_prevents_submit(monkeypatch):
     monkeypatch.setattr(forms, 'fill_question', Mock(return_value=True))
     monkeypatch.setattr(forms, 'verify_question', Mock(return_value=False))
     action = Mock()
+    frame.locator.return_value.count.return_value = 0
+    frame.locator.return_value.all_text_contents.return_value = []
     frame.locator.return_value.filter.return_value.count.return_value = 0
     monkeypatch.setattr(forms, 'button', lambda f, names: action)
     result = original(Mock(frames=[frame]), lambda q: {'answer': [0]}, submit=True)
@@ -212,3 +216,47 @@ def test_et_talk_reports_recording_requirement_instead_of_generic_zero_questions
     result = forms.answer_page(Mock(frames=[frame]), solve, allow_reading=True)
     assert result['status'] == 'needs_manual' and '口语' in result['message']
     solve.assert_not_called()
+
+
+@pytest.mark.parametrize('value,expected', [
+    ('已完成', True), ('<span class="done">已完成</span>', True),
+    ('未完成', False), ('<span>未完成</span>', False), ('尚未完成', False),
+    ('true', True), (True, True), (1, True), ('false', False), (None, False),
+    ('已完成 1/2', False), ('已通过', True), ('未通过', False),
+])
+def test_welearn_completion_status_uses_exact_platform_value(value, expected):
+    from app.services.course.english.clients import completed_status
+    assert completed_status(value) is expected
+
+
+def test_et_rejection_reports_unfinished_recordings_without_exposing_body():
+    frame = Mock()
+    frame.locator.return_value.all_text_contents.return_value = ['还有3题未完成，请全部完成再提交！']
+    frame.locator.return_value.count.return_value = 3
+    message = forms.platform_rejection(frame)
+    assert '还有 3 题未完成' in message
+    assert '口语录音' in message
+
+
+def test_et_confirmation_requires_unique_known_title():
+    frame = Mock()
+    dialog = frame.locator.return_value
+    dialog.count.return_value = 1
+    dialog.locator.return_value.inner_text.return_value = '确认提交？'
+    candidate = dialog.get_by_role.return_value
+    candidate.count.return_value = 1
+    candidate.is_enabled.return_value = True
+    assert forms.native_et_confirmation(frame) is candidate
+    dialog.locator.return_value.inner_text.return_value = '重新作答？'
+    assert forms.native_et_confirmation(frame) is None
+    dialog.count.return_value = 2
+    assert forms.native_et_confirmation(frame) is None
+
+
+def test_native_submission_rejection_is_not_unknown_or_success(monkeypatch):
+    monkeypatch.setattr(forms, 'platform_rejection', lambda frame: '平台拒绝提交：还有 3 题未完成')
+    result, action = fake_page(monkeypatch)
+    assert result['counts']['submission_rejected'] == 1
+    assert result['counts']['submission_unknown'] == 0
+    assert result['counts']['submitted'] == 0
+    action.click.assert_called_once()

@@ -5,9 +5,18 @@ from pathlib import Path
 
 FORM_SCRIPT = Path(__file__).with_name('question_form.js').read_text(encoding='utf-8')
 # Deliberately narrow: a click is not proof of a successful save/submission.
-RECEIPT_SCRIPT = r"""() => Array.from(document.querySelectorAll(
+RECEIPT_SCRIPT = r"""() => {
+ const visible = e => !!e?.getClientRects().length && getComputedStyle(e).visibility !== 'hidden';
+ const receipts = Array.from(document.querySelectorAll(
   '[role=dialog], .ant-modal-content, .completion, .result, .save-success, .submit-success, [data-submitted], et-button[success-text="Submitted"] button'
-)).filter(e => e.getClientRects().length).map(e => e.matches('et-button[success-text="Submitted"] button') && (e.innerText || '').trim() === 'Submitted' ? '课件已提交' : e.hasAttribute('data-submitted') && ['', 'true', '1', 'submitted'].includes(e.getAttribute('data-submitted')) ? '课件已提交' : (e.innerText || '')).join('\n').slice(0,10000)"""
+ )).filter(visible).map(e => e.matches('et-button[success-text="Submitted"] button') && (e.innerText || '').trim() === 'Submitted' ? '课件已提交' : e.hasAttribute('data-submitted') && ['', 'true', '1', 'submitted'].includes(e.getAttribute('data-submitted')) ? '课件已提交' : (e.innerText || ''));
+ for (const item of document.querySelectorAll('et-item')) {
+   const reset = item.querySelector('et-button[action="item.reset()"] button');
+   const submit = item.querySelector('et-button[action="item.submit()"] button');
+   if (visible(reset) && submit && !visible(submit)) receipts.push('课件已提交');
+ }
+ return receipts.join('\n').slice(0,10000);
+}"""
 
 
 def read_form(frame):
@@ -33,7 +42,7 @@ def public_question(question):
 
 
 def custom_selected(locator):
-    return locator.evaluate("e => e.getAttribute('aria-checked') === 'true' || e.getAttribute('aria-selected') === 'true' || e.getAttribute('data-selected') === 'true' || ['selected','checked','active','ui-state-active'].some(c => e.classList.contains(c))")
+    return locator.evaluate("e => e.getAttribute('aria-checked') === 'true' || e.getAttribute('aria-selected') === 'true' || e.getAttribute('data-selected') === 'true' || ['selected','checked','active','ui-state-active','chosen'].some(c => e.classList.contains(c))")
 
 
 def control_value(locator, kind):
@@ -100,6 +109,30 @@ def button(frame, names):
     return None
 
 
+def platform_rejection(frame):
+    # Fixed known messages only; never echo a body containing questions/answers.
+    text = frame.locator('div.tipsClass:visible').all_text_contents()
+    for value in text:
+        missing = re.search(r'还有\s*(\d{1,3})\s*题未完成', value)
+        if missing:
+            count = int(missing[1])
+            recording = frame.locator('et-button.recorder:visible').count()
+            detail = '，本页还含口语录音要求' if recording else ''
+            return f'平台拒绝提交：还有 {count} 题未完成{detail}；已填写的文字未计为整节提交成功'
+    return None
+
+
+def native_et_confirmation(frame):
+    dialogs = frame.locator('.ng-confirm-box:visible')
+    if dialogs.count() != 1:
+        return None
+    title = dialogs.locator('.ng-confirm-title').inner_text().strip()
+    if title not in ('确认提交？', '确认提交?'):
+        return None
+    button = dialogs.get_by_role('button', name='继续提交', exact=True)
+    return button if button.count() == 1 and button.is_enabled() else None
+
+
 def advance_tab(page, frames, deadline):
     if deadline is not None and time.monotonic() >= deadline:
         return False
@@ -147,15 +180,15 @@ def answer_page(page, solve, *, submit=False, deadline=None, native=None, frames
     if not counts['questions']:
         if allow_tabs and not counts['unsupported'] and advance_tab(page, frames, deadline):
             return {'status': 'advanced', 'message': '已访问课节内阅读页，继续下一题页', 'counts': {**counts, 'visited': 1, 'pages_advanced': 1}}
+        if allow_reading and any(frame.locator('et-talk, et-recorder').count() for frame in frames):
+            return {'status': 'needs_manual', 'message': '本节是口语录音任务，需在平台录制本人语音后提交', 'counts': counts}
         if allow_reading and not counts['unsupported'] and any(frame.evaluate(r'''() => {
           const item = document.querySelector('et-item[notscored]');
           return !!item && (item.innerText || '').trim().length >= 30 &&
-            !item.querySelector('et-blank,et-choice,et-select,et-tof,et-matching,et-sort,input,textarea,select,[contenteditable],[data-controltype="filling"],[data-controltype="choice"]');
+            !item.querySelector('et-blank,et-choice,et-select,et-tof,et-matching,et-sort,et-recorder,et-talk,input,textarea,select,[contenteditable],[data-controltype="filling"],[data-controltype="choice"]');
         }''') for frame in frames):
             return {'status': 'visited', 'message': '已访问无需填写的课件，正在核对平台进度',
                     'counts': {**counts, 'visited': 1}}
-        if allow_reading and any(frame.locator('et-talk').count() for frame in frames):
-            return {'status': 'needs_manual', 'message': '本节是口语对话任务，请在平台完成口语录音', 'counts': counts}
         return {'status': 'needs_manual', 'message': '未识别到支持的题目，未提交', 'counts': counts}
     if counts['unsupported']:
         return {'status': 'needs_manual', 'message': '存在不支持的控件，未调用 AI、填写或提交', 'counts': counts}
@@ -217,11 +250,29 @@ def answer_page(page, solve, *, submit=False, deadline=None, native=None, frames
     try:
         confirmation = frame.locator('.cmd_submit:visible').filter(has_text=re.compile(r'^(?:Submit|提交|确认提交|确定提交)$'))
         had_confirmation = confirmation.count() > 0
+        had_et_confirmation = frame.locator('.ng-confirm-box:visible').count() > 0
         action.click(timeout=10000)
         page.wait_for_timeout(500)
+        rejected = platform_rejection(frame)
+        if rejected:
+            counts['submission_rejected'] = 1
+            return {'status': 'needs_manual', 'message': rejected, 'counts': counts}
         if submit and not had_confirmation and confirmation.count() == 1:
             confirmation.click(timeout=10000)
+        elif submit and not had_et_confirmation and frame.locator('et-item').count():
+            et_confirmation = None
+            for _ in range(8):
+                et_confirmation = native_et_confirmation(frame)
+                if et_confirmation is not None or (deadline is not None and time.monotonic() >= deadline):
+                    break
+                page.wait_for_timeout(250)
+            if et_confirmation is not None:
+                et_confirmation.click(timeout=10000)
         page.wait_for_timeout(1500)
+        rejected = platform_rejection(frame)
+        if rejected:
+            counts['submission_rejected'] = 1
+            return {'status': 'needs_manual', 'message': rejected, 'counts': counts}
         receipt = frame.evaluate(RECEIPT_SCRIPT)
         marker = ('提交成功', '作业已提交', '本次共完成', '正确率', '课件已提交') if submit else ('保存成功', '已保存')
         if (receipt != before and any(text in receipt for text in marker)

@@ -5,6 +5,7 @@ U-campus AI uses official authenticated browser requests and visible course cont
 See docs/english-learning.md and third_party/english-learning/ for provenance.
 """
 import json
+from html import unescape
 import re
 import time
 from contextlib import contextmanager
@@ -15,6 +16,17 @@ import requests
 
 class PlatformError(Exception):
     pass
+
+
+def completed_status(value):
+    if isinstance(value, bool):
+        return value
+    if type(value) in (int, float):
+        return value == 1
+    if not isinstance(value, str) or len(value) > 1024:
+        return False
+    status = unescape(re.sub(r'<[^>]*>', '', value)).strip().lower()
+    return status in ('1', 'true', 'completed', 'passed', '已完成', '完成', '已学完', '已通过')
 
 
 def course_url(value):
@@ -148,7 +160,7 @@ class Welearn:
         if not isinstance(rows, list):
             raise PlatformError('平台进度回读失败')
         row = next((row for row in rows if str(row.get('id')) == item), None)
-        return bool(row and str(row.get('iscomplete', '')).lower() in ('1', 'true', 'completed', 'passed'))
+        return bool(row and completed_status(row.get('iscomplete')))
 
     def sco(self, action, identity, **data):
         result = self.request('/Ajax/SCO.aspx', data={'action': action, **identity, **data})
@@ -244,7 +256,7 @@ def welearn_answer(credential, cid, item, seconds, solve, submit=False):
         selected = next((i for i in items if i['id'] == item), None)
         if selected is None:
             raise PlatformError('该小节不属于所选课程或尚未开放')
-        if str(selected.get('progress', '')).lower() in ('1', 'true', 'completed', 'passed'):
+        if completed_status(selected.get('progress')):
             return {'status': 'finished', 'message': '平台已标记该课节完成，已跳过', 'counts': {'skipped': 1}}
         url = Welearn.BASE + '/student/StudyCourse.aspx?' + urlencode({**identity, 'sco': item})
         with unipus_browser(credential, platform='welearn') as (context, page):
@@ -296,6 +308,7 @@ def welearn_answer(credential, cid, item, seconds, solve, submit=False):
                     page.wait_for_timeout(1000)
                 if completed:
                     result['counts']['platform_completed'] = 1
+                    result['counts']['submission_unknown'] = 0
                     result.update(status='finished', message='平台已确认课节完成')
                 elif result['status'] == 'visited':
                     result.update(status='needs_manual', message='已访问无需填写的课件；平台尚未确认完成，未伪报完成')

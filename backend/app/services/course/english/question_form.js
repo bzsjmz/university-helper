@@ -30,7 +30,7 @@
   // A custom courseware widget with no supported native controls must not be
   // silently ignored when another question on the same page is recognized.
   unsupported += [...document.querySelectorAll('et-choice, et-tof, et-blank, et-matching, et-sort, [data-controltype="filling"], [data-controltype="fillinglong"]')]
-    .filter(e => visible(e) && !e.querySelector('input:not([type="hidden"]):not([type="button"]):not([type="submit"]), textarea, select, .blank[contenteditable]:not([contenteditable="false"])')).length;
+    .filter(e => visible(e) && !(e.matches('et-choice') && e.querySelector('ol > li')) && !e.querySelector('input:not([type="hidden"]):not([type="button"]):not([type="submit"]), textarea, select, .blank[contenteditable]:not([contenteditable="false"])')).length;
   const questions = [];
   for (const [root, controls] of roots) {
     const courseware = root.matches('et-blank, [data-controltype="filling"], [data-controltype="fillinglong"]');
@@ -73,10 +73,11 @@
       ...(nativeOnly ? {requires_native: true} : {}), controls: ids, control_types: controls.map(controlType), values });
   }
   // WE Learn also uses clickable option rows rather than radio inputs.
-  for (const root of document.querySelectorAll('[data-controltype="choice"]')) {
+  for (const root of document.querySelectorAll('[data-controltype="choice"], et-choice')) {
     if (!visible(root) || roots.has(root)) continue;
-    const rows = [...root.querySelectorAll('ul[data-itemtype="options"] > li')].filter(visible);
-    const title = text(root.querySelector('.question-title, .stem, [data-itemtype="question"]')) || text(root);
+    const etChoice = root.matches('et-choice');
+    const rows = [...root.querySelectorAll(etChoice ? ':scope > .wrapper > ol > li' : 'ul[data-itemtype="options"] > li')].filter(visible);
+    const title = text(root.querySelector(etChoice ? ':scope > .wrapper > span' : '.question-title, .stem, [data-itemtype="question"]')) || text(root);
     const options = rows.map(text);
     if (!title || rows.length < 2 || rows.length > 26 || new Set(options).size !== rows.length || options.some(s => !s) || root.querySelector('img, audio, video')) {
       unsupported++; continue;

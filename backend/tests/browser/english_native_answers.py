@@ -65,6 +65,52 @@ class NativeBrowserTest(unittest.TestCase):
         self.assertEqual(result['counts']['native_answers'], 5)
         self.assertEqual(result['counts']['filled'], 5)
 
+    def test_et_confirmation_and_reset_are_native_submission_receipt(self):
+        result = self.run_page('''<et-item><p>Fill <et-blank><input type="text"><span class="key" hidden>word</span></et-blank></p>
+          <et-button id="submitTag" action="item.submit()"><button onclick="document.querySelector('.ng-confirm-box').hidden=false">Submit</button></et-button>
+          <et-button id="resetTag" action="item.reset()" hidden><button>Reset</button></et-button>
+          <div class="ng-confirm-box" hidden><span class="ng-confirm-title">确认提交？</span>
+          <button onclick="document.getElementById('submitTag').hidden=true;document.getElementById('resetTag').hidden=false;this.parentElement.hidden=true">继续提交</button></div></et-item>''', submit=True)
+        self.assertEqual(result['counts']['submitted'], 1)
+
+    def test_et_recording_rejection_is_not_unknown_submission(self):
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True, chromium_sandbox=True)
+            try:
+                page = browser.new_page()
+                page.set_content('''<et-item><p>Fill <et-blank><input type="text"><span class="key" hidden>word</span></et-blank></p>
+                  <et-recorder><et-button class="recorder"><button>Record</button></et-button></et-recorder>
+                  <button onclick="document.querySelector('.tipsClass').hidden=false">Submit</button>
+                  <div class="tipsClass" hidden>还有3题未完成，请全部完成再提交！</div></et-item>''')
+                result = answer_page(page, lambda q: {'answer': q['native_answer'], 'source': 'native'}, native=NativeAnswers(), submit=True)
+                self.assertEqual(result['counts']['filled'], 1)
+                self.assertEqual(result['counts']['submitted'], 0)
+                self.assertEqual(result['counts']['submission_unknown'], 0)
+                self.assertEqual(result['counts']['submission_rejected'], 1)
+                self.assertIn('口语录音', result['message'])
+            finally:
+                browser.close()
+
+    def test_recording_only_page_is_never_classed_as_reading(self):
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True, chromium_sandbox=True)
+            try:
+                page = browser.new_page()
+                page.set_content('<et-item notscored>Repeat these sentences and record your own voice.<et-recorder><button>Record</button></et-recorder></et-item>')
+                result = answer_page(page, lambda q: self.fail('No text question'), allow_reading=True)
+                self.assertEqual(result['status'], 'needs_manual')
+                self.assertIn('录制本人语音', result['message'])
+                self.assertNotIn('visited', result['counts'])
+            finally:
+                browser.close()
+
+    def test_et_choice_rows_use_own_stem_and_verify_chosen_class(self):
+        result = self.run_page('''<et-item><et-choice data-solution="blue"><div class="wrapper"><span>Choose blue</span>
+          <ol><li onclick="this.className='chosen'">red</li><li onclick="this.className='chosen'">blue</li></ol>
+          </div></et-choice><button onclick="document.querySelector('.result').textContent='保存成功'">保存</button><div class="result"></div></et-item>''')
+        self.assertEqual(result['counts']['questions'], 1)
+        self.assertEqual(result['counts']['filled'], 1)
+
     def test_uai_course_card_catalog_and_native_save_in_browser(self):
         from app.services.course.english import uai
         @contextmanager

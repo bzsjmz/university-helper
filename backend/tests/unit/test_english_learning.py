@@ -332,14 +332,15 @@ def test_portal_prefixed_ai5_login_keeps_its_verification_resources():
     assert not decorative_portal_resource(Mock(resource_type='image', frame=Mock(url='https://uai.unipus.cn/portal/sso/login')))
 
 
-def test_welearn_completion_reads_only_selected_unit_without_synthetic_writes():
+@pytest.mark.parametrize('done,pending', [(True, False), ('已完成', '未完成'), ('<span>已完成</span>', '<span>未完成</span>')])
+def test_welearn_completion_reads_only_selected_unit_without_synthetic_writes(done, pending):
     client = clients.Welearn('sid=fixture')
     client._item_units = {'leaf': 2}
-    client.request = Mock(return_value={'info': [{'id': 'leaf', 'iscomplete': True}]})
+    client.request = Mock(return_value={'info': [{'id': 'leaf', 'iscomplete': done}]})
     identity = {'cid': 'course', 'uid': 'user', 'classid': 'class'}
     assert client.item_complete(identity, 'leaf')
     client.request.assert_called_once_with('/ajax/StudyStat.aspx', params={'action':'scoLeaves', **identity, 'unitidx':2})
-    client.request.return_value = {'info': [{'id': 'leaf', 'iscomplete': False}]}
+    client.request.return_value = {'info': [{'id': 'leaf', 'iscomplete': pending}]}
     assert not client.item_complete(identity, 'leaf')
     client.session.close()
 
