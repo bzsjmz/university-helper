@@ -8,6 +8,7 @@ from loguru import logger
 from .answer_cache import CacheDAO
 from .answer_check import check_answer
 from .answer_quality import is_usable_answer
+from .local_question_bank import lookup as lookup_local_question_bank
 from .answer_utils import _apply_ocr_to_title_if_needed
 from .query_control import bounded_query, check_control, provider_scope, QueryControlError, ProviderUnavailable
 
@@ -135,6 +136,11 @@ class Tiku:
     def query(self, q_info: dict) -> str | None:
         if self.DISABLE:
             return None
+
+        local_answer = self._query_local_bank(q_info)
+        if local_answer is not None:
+            logger.info("命中导入的本地题库")
+            return local_answer
 
         # 预处理, 去除【单选题】这样与标题无关的字段
         logger.debug(f"原始标题：{q_info['title']}")
@@ -304,6 +310,13 @@ class Tiku:
         fallback.config_set(self._conf)
         return fallback
 
+    def _query_local_bank(self, q_info):
+        answer = lookup_local_question_bank(q_info)
+        if q_info.get('type') == 'judgement' and answer is not None:
+            values = self.true_list if answer == '正确' else self.false_list
+            return values[0] if values else answer
+        return answer
+
     def judgement_select(self, answer: str) -> bool:
         """
         这是一个专用的方法, 要求配置维护两个选项列表, 一份用于正确选项, 一份用于错误选项, 以应对题库对判断题答案响应的各种可能的情况
@@ -375,6 +388,10 @@ class TikuFallback(Tiku):
         """
         if self.DISABLE:
             return None
+        local_answer = self._query_local_bank(q_info)
+        if local_answer is not None:
+            logger.info("命中导入的本地题库")
+            return local_answer
         _apply_ocr_to_title_if_needed(q_info)
         q_info["title"] = sub(r"^\d+", "", q_info["title"])
         q_info["title"] = sub(r"（\d+\.\d+分）$", "", q_info["title"])
