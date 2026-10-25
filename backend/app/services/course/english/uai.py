@@ -9,7 +9,7 @@ from urllib.parse import urlsplit
 
 from .clients import PlatformError
 
-HOME = 'https://ucloud.unipus.cn/'
+HOME = 'https://uai.unipus.cn/portal/'
 COURSES = 'https://uai.unipus.cn/api/cmgt/course/getHomeCourseListByStudent'
 
 
@@ -20,7 +20,7 @@ def decorative_portal_resource(request):
         frame_url = urlsplit(request.frame.url)
         return (request.resource_type in ('image', 'media', 'font')
                 and frame_url.hostname in ('ucloud.unipus.cn', 'uai.unipus.cn')
-                and frame_url.path != '/sso' and not frame_url.path.startswith('/sso/'))
+                and not re.match(r'^/(?:portal/)?sso(?:/|$)', frame_url.path))
     except Exception:
         return False
 
@@ -37,7 +37,7 @@ def courses(context, page=None, *, include_groups=False):
     if not jwt:
         return []
     response = context.request.get(COURSES, headers={'Authorization': jwt, 'u-app-id': '39', 'u-platform': '2',
-                                            'Referer': HOME, 'Origin': HOME.rstrip('/')},
+                                            'Referer': HOME, 'Origin': 'https://' + urlsplit(HOME).netloc},
                                    timeout=15000, max_redirects=0)
     try:
         if response.status != 200:

@@ -59,6 +59,7 @@ class Welearn:
     BASE = 'https://welearn.sflep.com'
 
     def __init__(self, credential):
+        self._item_units = {}
         self.session = requests.Session()
         self.session.trust_env = False
         self.session.headers.update({'Referer': self.BASE + '/student/index.aspx',
@@ -133,9 +134,21 @@ class Welearn:
             for lesson in lessons:
                 if str(lesson.get('isvisible', 'true')).lower() == 'false':
                     continue
+                self._item_units[str(lesson['id'])] = index
                 items.append({'id': str(lesson['id']), 'name': str(lesson.get('location', lesson['id']))[:256],
                               'progress': str(lesson.get('iscomplete', ''))[:32]})
         return identity, items
+
+    def item_complete(self, identity, item):
+        unit = self._item_units.get(item)
+        if unit is None:
+            return False
+        rows = self.request('/ajax/StudyStat.aspx', params={
+            'action': 'scoLeaves', **identity, 'unitidx': unit}).get('info')
+        if not isinstance(rows, list):
+            raise PlatformError('平台进度回读失败')
+        row = next((row for row in rows if str(row.get('id')) == item), None)
+        return bool(row and str(row.get('iscomplete', '')).lower() in ('1', 'true', 'completed', 'passed'))
 
     def sco(self, action, identity, **data):
         result = self.request('/Ajax/SCO.aspx', data={'action': action, **identity, **data})
@@ -224,22 +237,68 @@ def unipus(credential, url, *, item=None, seconds=0, expected_name=None, solve=N
 
 
 def welearn_answer(credential, cid, item, seconds, solve, submit=False):
+    from .welearn_page import wait_content, return_to_catalog
     client = Welearn(credential)
     try:
         identity, items = client.items(cid)
+        selected = next((i for i in items if i['id'] == item), None)
+        if selected is None:
+            raise PlatformError('该小节不属于所选课程或尚未开放')
+        if str(selected.get('progress', '')).lower() in ('1', 'true', 'completed', 'passed'):
+            return {'status': 'finished', 'message': '平台已标记该课节完成，已跳过', 'counts': {'skipped': 1}}
+        url = Welearn.BASE + '/student/StudyCourse.aspx?' + urlencode({**identity, 'sco': item})
+        with unipus_browser(credential, platform='welearn') as (context, page):
+            from .native_answers import NativeAnswers
+            native = NativeAnswers()
+            context.on('response', native.observe)
+            deadline = time.monotonic() + seconds
+            page.goto(url, wait_until='domcontentloaded')
+            frames = wait_content(page, deadline)
+            if not frames:
+                return {'status': 'needs_manual', 'message': '课件正文未加载完成，请重试；没有将空白页面当作无题章节', 'counts': {}}
+            from .forms import answer_page
+            totals = {}
+            for _ in range(20):
+                result = answer_page(page, solve, submit=submit, deadline=deadline, native=native,
+                                     frames=frames, allow_reading=True, allow_tabs=True)
+                for key, value in result['counts'].items():
+                    if type(value) is int and value >= 0:
+                        totals[key] = totals.get(key, 0) + value
+                if result['status'] != 'advanced':
+                    break
+                if time.monotonic() >= deadline:
+                    result = {'status': 'needs_manual', 'message': '同一课节题页尚未完成，答题预算已用完', 'counts': {}}
+                    break
+                frames = wait_content(page, deadline)
+                if not frames:
+                    result = {'status': 'needs_manual', 'message': '下一题页未加载完成，未提交', 'counts': {}}
+                    break
+            else:
+                result = {'status': 'needs_manual', 'message': '课节题页超过本轮处理范围，未继续切换', 'counts': {}}
+            result['counts'] = totals
+            fully_filled = (result['counts'].get('questions', 0) > 0
+                            and result['counts'].get('filled') == result['counts']['questions']
+                            and not result['counts'].get('unsupported') and not result['counts'].get('missing'))
+            if result['status'] == 'visited' or fully_filled:
+                # Use the real courseware exit to let its SCORM runtime save.
+                # Never write fabricated completion/score fields.
+                return_to_catalog(page)
+                for cookie in context.cookies([Welearn.BASE]):
+                    client.session.cookies.set(cookie['name'], cookie['value'], domain='welearn.sflep.com', path='/')
+                completed = False
+                for attempt in range(3):
+                    try:
+                        completed = client.item_complete(identity, item)
+                    except (PlatformError, requests.RequestException):
+                        break
+                    if completed or attempt == 2 or time.monotonic() + 1 >= deadline:
+                        break
+                    page.wait_for_timeout(1000)
+                if completed:
+                    result['counts']['platform_completed'] = 1
+                    result.update(status='finished', message='平台已确认课节完成')
+                elif result['status'] == 'visited':
+                    result.update(status='needs_manual', message='已访问无需填写的课件；平台尚未确认完成，未伪报完成')
+            return result
     finally:
         client.session.close()
-    selected = next((i for i in items if i['id'] == item), None)
-    if selected is None:
-        raise PlatformError('该小节不属于所选课程或尚未开放')
-    if str(selected.get('progress', '')).lower() in ('1', 'true', 'completed', 'passed'):
-        return {'status': 'finished', 'message': '平台已标记该课节完成，已跳过', 'counts': {'skipped': 1}}
-    url = Welearn.BASE + '/student/StudyCourse.aspx?' + urlencode({**identity, 'sco': item})
-    with unipus_browser(credential, platform='welearn') as (context, page):
-        from .native_answers import NativeAnswers
-        native = NativeAnswers()
-        context.on('response', native.observe)
-        page.goto(url, wait_until='domcontentloaded')
-        page.wait_for_timeout(2000)
-        from .forms import answer_page
-        return answer_page(page, solve, submit=submit, deadline=time.monotonic() + seconds, native=native)

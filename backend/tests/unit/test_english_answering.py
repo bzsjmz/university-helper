@@ -199,3 +199,16 @@ def test_fill_and_read_back_use_native_controls():
     q = {**question(), 'controls': ['0'], 'values': ['past', 'future']}
     assert forms.fill_question(frame, q, [1])
     assert controls['0'].value == 'future'
+
+
+def test_et_talk_reports_recording_requirement_instead_of_generic_zero_questions(monkeypatch):
+    from app.services.course.english import forms
+    frame = Mock()
+    frame.evaluate.return_value = False
+    frame.locator.return_value.count.return_value = 1
+    monkeypatch.setattr(forms, 'frame_visible', lambda frame: True)
+    monkeypatch.setattr(forms, 'read_form', lambda frame: {'questions': [], 'unsupported': 0, 'blocked': False})
+    solve = Mock()
+    result = forms.answer_page(Mock(frames=[frame]), solve, allow_reading=True)
+    assert result['status'] == 'needs_manual' and '口语' in result['message']
+    solve.assert_not_called()

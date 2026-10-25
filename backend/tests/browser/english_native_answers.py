@@ -75,7 +75,7 @@ class NativeBrowserTest(unittest.TestCase):
                 try:
                     context = browser.new_context()
                     def route(r):
-                        if 'ucloud.unipus.cn' in r.request.url:
+                        if 'uai.unipus.cn' in r.request.url:
                             body = '<button onclick="document.querySelector(\'a\').style.display=\'block\'">Class English</button><a style="display:none" href="https://ucontent.unipus.cn/_explorationpc_default/pc.html">AI English</a>'
                         else:
                             body = '<div data-group-id="leaf1" onclick="document.querySelector(\'.question\').hidden=false">Lesson 1</div><div class="question" hidden><h3 class="stem">Fill the word</h3><input type="text"></div><button onclick="document.querySelector(\'.result\').textContent=\'保存成功\'">保存</button><div class="result"></div>'
@@ -91,6 +91,34 @@ class NativeBrowserTest(unittest.TestCase):
                              solve=lambda q: {'answer':['word'], 'source':'cache'})
             self.assertEqual(result['status'], 'finished', result)
             self.assertEqual(result['counts']['saved'], 1)
+
+    def test_et_blank_contenteditable_uses_own_hidden_key_and_native_input_events(self):
+        html = '<et-item><video></video>' + ''.join(
+            f'<p>Sentence {i} <et-blank id="q{i}"><span class="wrapper"><span class="blank" style="display:inline-block;min-width:80px;min-height:20px" contenteditable="" ng-model="blank.value"></span><span class="key" style="display:none">word{i}</span></span></et-blank>.</p>'
+            for i in range(5)) + '<button onclick="document.querySelector(\'.result\').textContent=\'保存成功\'">保存</button><div class="result"></div></et-item>'
+        result = self.run_page(html)
+        self.assertEqual(result['counts']['questions'], 5)
+        self.assertEqual(result['counts']['native_answers'], 5)
+        self.assertEqual(result['counts']['filled'], 5)
+
+    def test_native_et_tab_next_reaches_editable_questions_without_leaving_lesson(self):
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True, chromium_sandbox=True)
+            try:
+                page = browser.new_page()
+                page.set_content('''<et-item><et-tab><ul class="headerTab"><li class="active">Words</li><li>Exercise</li></ul></et-tab>
+                  <et-button class="nextTab-btn" action="item.switchTab(0)"><button onclick="document.querySelectorAll('li')[0].className='';document.querySelectorAll('li')[1].className='active';document.querySelector('#exercise').hidden=false;this.parentElement.hidden=true">Next</button></et-button>
+                  <div id="exercise" hidden><p>Complete <et-blank><span class="blank" style="display:inline-block;min-width:80px;min-height:20px" contenteditable=""></span><span class="key" hidden>correct</span></et-blank>.</p>
+                  <button onclick="document.querySelector('.result').textContent='保存成功'">保存</button><div class="result"></div></div></et-item>''')
+                solve = lambda q: {'answer': q.get('native_answer'), 'source': 'native'}
+                first = answer_page(page, solve, native=NativeAnswers(), allow_tabs=True)
+                self.assertEqual(first['status'], 'advanced')
+                second = answer_page(page, solve, native=NativeAnswers(), allow_tabs=True)
+                self.assertEqual(second['status'], 'finished', second)
+                self.assertEqual(second['counts']['filled'], 1)
+                self.assertEqual(page.url, 'about:blank')
+            finally:
+                browser.close()
 
     def test_welearn_custom_option_rows_use_native_answer_and_verify_selection(self):
         result = self.run_page('''<html><body><div data-controltype="choice"><h3 class="stem">Pick blue</h3>

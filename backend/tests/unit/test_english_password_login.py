@@ -248,12 +248,11 @@ def test_wechat_handoff_does_not_interfere_with_binding_or_password_forms():
     assert not handoff.observe(page, b'form', None)
 
 
-def test_ucloud_5_login_entry_is_not_legacy_sso_service():
+def test_ai5_login_entry_matches_portal_page_instead_of_legacy_passport():
     from app.services.course.english.login_browser import LOGIN_URLS
     from app.services.course.english.uai import HOME
-    assert HOME == 'https://ucloud.unipus.cn/'
-    assert LOGIN_URLS['unipus_ai'].startswith('https://ucloud.unipus.cn/sso/login?')
-    assert 'uai.unipus.cn' not in LOGIN_URLS['unipus_ai']
+    assert HOME == 'https://uai.unipus.cn/portal/'
+    assert LOGIN_URLS['unipus_ai'] == 'https://uai.unipus.cn/portal/sso/login'
 
 
 @pytest.mark.parametrize('code', ['platform_timeout', 'browser_navigation', 'worker_response_timeout'])

@@ -249,7 +249,7 @@ def test_uai_courses_use_existing_browser_jwt_only_on_fixed_official_origin():
     context.request.get.return_value = response
     assert courses(context) == [{'id': 'ai-1', 'name': 'AI English'}]
     context.request.get.assert_called_once_with(COURSES, headers={'Authorization': 'private-jwt', 'u-app-id': '39', 'u-platform': '2',
-            'Referer': 'https://ucloud.unipus.cn/', 'Origin': 'https://ucloud.unipus.cn'}, timeout=15000, max_redirects=0)
+            'Referer': 'https://uai.unipus.cn/portal/', 'Origin': 'https://uai.unipus.cn'}, timeout=15000, max_redirects=0)
     response.dispose.assert_called_once()
     context.cookies.return_value = []
     assert courses(context) == []
@@ -325,3 +325,65 @@ def test_ucloud_proxy_login_keeps_captcha_and_fonts_but_portal_cover_art_is_bloc
     assert not decorative_portal_resource(request)
     request.frame.url = 'https://ucloud.unipus.cn/'
     assert decorative_portal_resource(request)
+
+
+def test_portal_prefixed_ai5_login_keeps_its_verification_resources():
+    from app.services.course.english.uai import decorative_portal_resource
+    assert not decorative_portal_resource(Mock(resource_type='image', frame=Mock(url='https://uai.unipus.cn/portal/sso/login')))
+
+
+def test_welearn_completion_reads_only_selected_unit_without_synthetic_writes():
+    client = clients.Welearn('sid=fixture')
+    client._item_units = {'leaf': 2}
+    client.request = Mock(return_value={'info': [{'id': 'leaf', 'iscomplete': True}]})
+    identity = {'cid': 'course', 'uid': 'user', 'classid': 'class'}
+    assert client.item_complete(identity, 'leaf')
+    client.request.assert_called_once_with('/ajax/StudyStat.aspx', params={'action':'scoLeaves', **identity, 'unitidx':2})
+    client.request.return_value = {'info': [{'id': 'leaf', 'iscomplete': False}]}
+    assert not client.item_complete(identity, 'leaf')
+    client.session.close()
+
+
+@pytest.mark.parametrize('completed', [True, False])
+def test_welearn_reading_requires_platform_confirmation_not_just_zero_questions(monkeypatch, completed):
+    from contextlib import nullcontext
+    from app.services.course.english import forms, welearn_page
+    client = Mock()
+    client.items.return_value = ({'cid':'c'}, [{'id':'leaf', 'progress':'false'}])
+    client.item_complete.return_value = completed
+    factory = Mock(return_value=client, BASE='https://welearn.sflep.com')
+    monkeypatch.setattr(clients, 'Welearn', factory)
+    context, page, frame = Mock(), Mock(), Mock()
+    context.cookies.return_value = []
+    monkeypatch.setattr(clients, 'unipus_browser', lambda *a, **kw: nullcontext((context,page)))
+    monkeypatch.setattr(welearn_page, 'wait_content', lambda *a: [frame])
+    monkeypatch.setattr(welearn_page, 'return_to_catalog', Mock())
+    monkeypatch.setattr(forms, 'answer_page', lambda *a, **kw: {'status':'visited','counts':{'questions':0,'visited':1}})
+    result = clients.welearn_answer('sid=private', 'c', 'leaf', 30, Mock())
+    assert result['status'] == ('finished' if completed else 'needs_manual')
+    assert result['counts'].get('platform_completed', 0) == int(completed)
+    client.sco.assert_not_called()
+    client.session.close.assert_called_once()
+
+
+def test_welearn_internal_tabs_aggregate_answers_before_progress_confirmation(monkeypatch):
+    from contextlib import nullcontext
+    from app.services.course.english import forms, welearn_page
+    client = Mock()
+    client.items.return_value = ({'cid':'c'}, [{'id':'leaf', 'progress':'false'}])
+    client.item_complete.return_value = True
+    monkeypatch.setattr(clients, 'Welearn', Mock(return_value=client, BASE='https://welearn.sflep.com'))
+    context, page, frame = Mock(), Mock(), Mock()
+    context.cookies.return_value = []
+    monkeypatch.setattr(clients, 'unipus_browser', lambda *a, **kw: nullcontext((context,page)))
+    monkeypatch.setattr(welearn_page, 'wait_content', lambda *a: [frame])
+    monkeypatch.setattr(welearn_page, 'return_to_catalog', Mock())
+    answer = Mock(side_effect=[{'status':'advanced','counts':{'questions':0,'visited':1}},
+        {'status':'advanced','counts':{'questions':2,'filled':2,'native_answers':2}},
+        {'status':'finished','counts':{'questions':1,'filled':1,'native_answers':1,'submitted':1}}])
+    monkeypatch.setattr(forms, 'answer_page', answer)
+    result = clients.welearn_answer('sid=private','c','leaf',30,Mock(),submit=True)
+    assert answer.call_count == 3
+    assert result['counts']['questions'] == 3 and result['counts']['native_answers'] == 3
+    assert result['counts']['platform_completed'] == 1
+    client.sco.assert_not_called()

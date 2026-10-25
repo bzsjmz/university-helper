@@ -5,6 +5,7 @@ authentication itself runs in the platform's page, never a forged token endpoint
 """
 import base64
 import json
+import re
 import time
 from urllib.parse import urlsplit
 
@@ -16,7 +17,7 @@ from .login_handoff import WechatHandoff, read_login_command
 
 LOGIN_URLS = {
     'welearn': 'https://welearn.sflep.com/user/prelogin.aspx?loginret=https%3A%2F%2Fwelearn.sflep.com%2Fstudent%2Findex.aspx',
-    'unipus_ai': 'https://ucloud.unipus.cn/sso/login?service=https%3A%2F%2Fucloud.unipus.cn',
+    'unipus_ai': 'https://uai.unipus.cn/portal/sso/login',
 }
 WIDTH, HEIGHT = 1000, 760
 
@@ -182,8 +183,8 @@ def _login_browser(request):
                 # paired with this private context; never construct our own token URL.
                 page.locator('img[src*="/wx-"]').click()
             else:
-                page.locator('[name="username"]:visible').fill(request.pop('username'))
-                page.locator('[name="password"]:visible').fill(request.pop('password'))
+                page.locator('[name="username"]:visible, input[placeholder*="手机号"]:visible, input[placeholder*="用户名"]:visible').fill(request.pop('username'))
+                page.locator('[name="password"]:visible, input[type="password"]:visible').fill(request.pop('password'))
                 # Leave agreements and verification to the user. A prefilled official
                 # page is shown when these are required, without exporting cookies.
                 checkboxes = page.locator('input[type="checkbox"]:visible').all()
@@ -192,7 +193,7 @@ def _login_browser(request):
                 requires_code = any(not c.input_value() for c in
                                     page.locator('input[placeholder*="验证码"]:visible').all())
                 if not requires_agreement and not requires_code:
-                    buttons = page.get_by_role('button', name='登录', exact=True).all()
+                    buttons = page.get_by_role('button', name=re.compile(r'^登\s*录$')).all()
                     visible = [b for b in buttons if b.is_visible() and b.is_enabled()]
                     if len(visible) == 1:
                         visible[0].click()

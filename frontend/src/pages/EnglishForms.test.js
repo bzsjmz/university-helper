@@ -122,3 +122,45 @@ test('WE listening dialogue blanks use their bound hidden result without leaking
   document.querySelector('[data-itemtype=result]').textContent = '(Answers may vary.)'
   expect(native(extract().questions[0])).toEqual([])
 })
+
+
+test('ET blank contenteditable empty attribute binds its own key and ignores previous input text', () => {
+  document.body.innerHTML = `<video></video><p>Fill the word <et-blank id="current"><span class="blank" contenteditable="">previous</span><span class="key" hidden>correct</span></et-blank>.</p><et-blank hidden><span class="key">other</span></et-blank>`
+  const form = extract()
+  expect(form.questions).toHaveLength(1)
+  expect(form.unsupported).toBe(0)
+  expect(form.questions[0].control_types).toEqual(['contenteditable'])
+  expect(form.questions[0].title).not.toContain('previous')
+  expect(form.questions[0].title).not.toContain('correct')
+  expect(native(form.questions[0])).toEqual([['correct']])
+  document.querySelector('.blank').textContent = 'correct'
+  expect(extract()).toEqual(form)
+})
+
+test('ET media toggle is not an exercise while matching remains unsupported', () => {
+  document.body.innerHTML = '<et-toggle><input type="checkbox"></et-toggle><et-matching></et-matching>'
+  expect(extract().unsupported).toBe(1)
+})
+
+
+test('ET standalone answer slots without a local sentence use only their own native key', () => {
+  document.body.innerHTML = '<div><et-blank><span class="blank" contenteditable=""></span><span class="key" hidden>B</span></et-blank></div>'
+  const form = extract()
+  expect(form.questions).toHaveLength(1)
+  expect(form.unsupported).toBe(0)
+  expect(form.questions[0].requires_native).toBe(true)
+  expect(native(form.questions[0])).toEqual([['B']])
+})
+
+
+test('ET non-scored subjective input remains answerable and uses delivered transcript without hidden measurement fields', () => {
+  document.body.innerHTML = `<et-item><video></video><et-script hidden>A supplied conversation transcript.</et-script><et-tab><tab><et-direction>Explain the speaker's plans.</et-direction><div><et-blank notscored multiline><textarea ng-model="blank.value"></textarea><textarea style="visibility:hidden;height:0"></textarea></et-blank></div></tab></et-tab></et-item>`
+  const form = extract()
+  expect(form.unsupported).toBe(0)
+  expect(form.questions).toHaveLength(1)
+  expect(form.questions[0].type).toBe('shortanswer')
+  expect(form.questions[0].count).toBe(1)
+  expect(form.questions[0].title).toContain('plans')
+  expect(form.questions[0].context).toContain('supplied conversation')
+  expect(form.questions[0].requires_native).not.toBe(true)
+})

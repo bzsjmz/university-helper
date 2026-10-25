@@ -6,8 +6,8 @@ from pathlib import Path
 FORM_SCRIPT = Path(__file__).with_name('question_form.js').read_text(encoding='utf-8')
 # Deliberately narrow: a click is not proof of a successful save/submission.
 RECEIPT_SCRIPT = r"""() => Array.from(document.querySelectorAll(
-  '[role=dialog], .ant-modal-content, .completion, .result, .save-success, .submit-success, [data-submitted]'
-)).filter(e => e.getClientRects().length).map(e => e.hasAttribute('data-submitted') && ['', 'true', '1', 'submitted'].includes(e.getAttribute('data-submitted')) ? '课件已提交' : (e.innerText || '')).join('\n').slice(0,10000)"""
+  '[role=dialog], .ant-modal-content, .completion, .result, .save-success, .submit-success, [data-submitted], et-button[success-text="Submitted"] button'
+)).filter(e => e.getClientRects().length).map(e => e.matches('et-button[success-text="Submitted"] button') && (e.innerText || '').trim() === 'Submitted' ? '课件已提交' : e.hasAttribute('data-submitted') && ['', 'true', '1', 'submitted'].includes(e.getAttribute('data-submitted')) ? '课件已提交' : (e.innerText || '')).join('\n').slice(0,10000)"""
 
 
 def read_form(frame):
@@ -36,6 +36,10 @@ def custom_selected(locator):
     return locator.evaluate("e => e.getAttribute('aria-checked') === 'true' || e.getAttribute('aria-selected') === 'true' || e.getAttribute('data-selected') === 'true' || ['selected','checked','active','ui-state-active'].some(c => e.classList.contains(c))")
 
 
+def control_value(locator, kind):
+    return locator.inner_text() if kind == 'contenteditable' else locator.input_value()
+
+
 def fill_question(frame, question, answer):
     controls = [frame.locator(f'[data-uh-control="{i}"]') for i in question['controls']]
     kind = question['type']
@@ -61,10 +65,15 @@ def fill_question(frame, question, answer):
     if (not isinstance(answer, list) or len(answer) != len(controls)
             or any(not isinstance(s, str) or not s.strip() for s in answer)):
         return False
-    for locator, value in zip(controls, answer):
+    kinds = question.get('control_types', ['text'] * len(controls))
+    for locator, value, control_kind in zip(controls, answer, kinds):
         locator.fill(value)
+        if control_kind == 'contenteditable':
+            locator.dispatch_event('input')
+            locator.dispatch_event('keyup', {'key': 'Unidentified'})
+            locator.press('Tab')
         locator.dispatch_event('change')
-    return all(locator.input_value() == value for locator, value in zip(controls, answer))
+    return all(control_value(locator, kind) == value for locator, value, kind in zip(controls, answer, kinds))
 
 
 def verify_question(frame, question, answer):
@@ -75,7 +84,7 @@ def verify_question(frame, question, answer):
         if question['values']:
             return controls[0].input_value() == question['values'][answer[0]]
         return all(locator.is_checked() == (i in answer) for i, locator in enumerate(controls))
-    return all(locator.input_value() == value for locator, value in zip(controls, answer))
+    return all(control_value(locator, kind) == value for locator, value, kind in zip(controls, answer, question.get('control_types', ['text'] * len(controls))))
 
 
 def button(frame, names):
@@ -91,16 +100,41 @@ def button(frame, names):
     return None
 
 
-def answer_page(page, solve, *, submit=False, deadline=None, native=None):
+def advance_tab(page, frames, deadline):
+    if deadline is not None and time.monotonic() >= deadline:
+        return False
+    choices = []
+    for frame in frames:
+        locator = frame.locator('et-item et-button.nextTab-btn[action="item.switchTab(0)"] button:visible')
+        if locator.count() == 1 and locator.is_enabled():
+            choices.append((frame, locator))
+    if len(choices) != 1:
+        return False
+    frame, locator = choices[0]
+    before = frame.evaluate("() => [...document.querySelectorAll('et-tab .headerTab li.active')].map(e=>e.textContent.trim()).join('|')")
+    url = frame.url
+    locator.click(timeout=5000)
+    for _ in range(12):
+        page.wait_for_timeout(250)
+        if frame.url != url:
+            return False
+        after = frame.evaluate("() => [...document.querySelectorAll('et-tab .headerTab li.active')].map(e=>e.textContent.trim()).join('|')")
+        if after and after != before:
+            return True
+    return False
+
+
+def answer_page(page, solve, *, submit=False, deadline=None, native=None, frames=None, allow_reading=False, allow_tabs=False):
     """All frames are checked before filling; one unknown control blocks submission.
 
-    A task handles exactly the selected page. It never walks to another page,
-    retakes a paper, or retries a click whose outcome is unknown.
+    Default callers handle one selected page. WE Learn may opt into its
+    declared ET tab pager; no caller retakes a paper or retries an uncertain click.
     """
     counts = dict(questions=0, answered=0, missing=0, unsupported=0, filled=0,
                   saved=0, submitted=0, submission_unknown=0, native_answers=0, cache_hits=0, ai_answers=0)
+    frames = list(page.frames) if frames is None else list(frames)
     forms = []
-    for frame in page.frames:
+    for frame in frames:
         if not frame_visible(frame):
             continue
         snapshot = read_form(frame)
@@ -111,6 +145,17 @@ def answer_page(page, solve, *, submit=False, deadline=None, native=None):
             forms.append((frame, snapshot))
             counts['questions'] += len(snapshot['questions'])
     if not counts['questions']:
+        if allow_tabs and not counts['unsupported'] and advance_tab(page, frames, deadline):
+            return {'status': 'advanced', 'message': '已访问课节内阅读页，继续下一题页', 'counts': {**counts, 'visited': 1, 'pages_advanced': 1}}
+        if allow_reading and not counts['unsupported'] and any(frame.evaluate(r'''() => {
+          const item = document.querySelector('et-item[notscored]');
+          return !!item && (item.innerText || '').trim().length >= 30 &&
+            !item.querySelector('et-blank,et-choice,et-select,et-tof,et-matching,et-sort,input,textarea,select,[contenteditable],[data-controltype="filling"],[data-controltype="choice"]');
+        }''') for frame in frames):
+            return {'status': 'visited', 'message': '已访问无需填写的课件，正在核对平台进度',
+                    'counts': {**counts, 'visited': 1}}
+        if allow_reading and any(frame.locator('et-talk').count() for frame in frames):
+            return {'status': 'needs_manual', 'message': '本节是口语对话任务，请在平台完成口语录音', 'counts': counts}
         return {'status': 'needs_manual', 'message': '未识别到支持的题目，未提交', 'counts': counts}
     if counts['unsupported']:
         return {'status': 'needs_manual', 'message': '存在不支持的控件，未调用 AI、填写或提交', 'counts': counts}
@@ -158,8 +203,10 @@ def answer_page(page, solve, *, submit=False, deadline=None, native=None):
         if not frame_visible(frame) or read_form(frame) != snapshot or not all(verify_question(frame, q, a) for q, a in zip(snapshot['questions'], answers)):
             return {'status': 'needs_manual', 'message': '填写后页面或答案变化，未提交', 'counts': counts}
     names = ('提交', '提交作业', '提交答案', 'Submit') if submit else ('保存', '暂存', '保存答案', '保存作业', 'Save', 'Save answers')
-    candidates = [(frame, button(frame, names)) for frame in page.frames if frame_visible(frame)]
+    candidates = [(frame, button(frame, names)) for frame in frames if frame_visible(frame)]
     candidates = [(frame, candidate) for frame, candidate in candidates if candidate is not None]
+    if not candidates and allow_tabs and advance_tab(page, frames, deadline):
+        return {'status': 'advanced', 'message': '当前题页已填写复核，继续同一课节下一题页', 'counts': {**counts, 'pages_advanced': 1}}
     if len(candidates) != 1:
         return {'status': 'needs_manual', 'message': '已填写，但未找到唯一保存/提交按钮，平台保存状态未确认', 'counts': counts}
     frame, action = candidates[0]

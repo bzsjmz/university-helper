@@ -169,10 +169,18 @@ socket；依赖其他 CDN/第三方域名的课程可能无法打开，须明确
 AI版已以合成官方页面和模拟接口验证；真实账号的课程卡片、目录及题型仍需验收。公开 UAI 门户完整媒体加载在 512MiB 测试浏览器内曾发生 renderer crash；限定在 AI 门户阻止装饰图片/媒体/字体后已能读取页面。SSO 验证码和 ucontent 课件媒体不受此规则影响，未放宽测试或生产限额；公开页加载成功不等于真实账号登录验证。
 
 
-## U校园 5.0 登录入口与扫码回调
+## U校园 AI版 5.0 的实际登录页
 
-U校园入口现为官方 <https://ucloud.unipus.cn/>，登录从该站的 `/sso/login` 发起并返回该站，界面标注“U校园 5.0（AI版）”。官方 5.0 门户公开前端仍将课程 API 发往 `uai.unipus.cn`；保留固定课程接口，认证状态新增仅限 `https://ucloud.unipus.cn` origin，不要求用户复制 Cookie。官方统一认证表单本身可能沿用旧样式，不能仅凭表单外观判断落地平台。匿名页面已确认用户名/密码及协议控件；真实账号的登录和教程仍需验收。
+登录入口固定为 <https://uai.unipus.cn/portal/sso/login>，首页为 `https://uai.unipus.cn/portal/`。此前的 `ucloud.unipus.cn/sso/login` 仍展示旧通行证，不能用“只是同样式”解释为正确适配；已撤换。新版表单没有 username/password name，通过官方手机号/用户名 placeholder 和 password 类型定位，兼容“登 录”的按钮文案，协议由用户在官方页勾选。新版 `/portal/sso/` 验证资源保留，账号密码不保存、不输出。
 
-WE Learn 授权回调允许至少五秒处理，不提前 GET 离开回调；页面短暂替换或扫码弹窗关闭后继续查看同一会话的存活官方标签，不重放授权码或提交操作。网络读课程暂时失败继续等待；平台超时、浏览器跳转和 worker 响应超时分别给出固定安全提示，不再全部称为二维码过期，不输出页面网址、异常正文或令牌。真实微信确认后的平台响应尚未使用用户账号复现。
+## 新目标第二版视听说的 ET 课件
 
-单次 HTTP 等待结束而登录 worker 仍存活时，保留十分钟以内的原登录窗口，下一次轮询只读未完成的回复，不重复写 refresh 或用户操作。U校园5.0 同域 `/sso/` 登录页的验证码、图片和字体保留，仅门户装饰资源作轻量加载。
+社区 [WELearnHelper](https://github.com/SSmJaE/WELearnHelper) 的课程分类明确将 `New Target College English_V2_Video Course` 归到 ET 类，与传统 filling/input 不同；只参考公开DOM/协议事实，未复制 GPL 实现。核对版本 `3dddb2af63e8004bf60416df3a62b72095206f5d`，参考文件 `exercise/courses.ts`、`exercise/et/parser.ts` 与 `solver.ts`。同时核对 [Welearn_Script](https://github.com/mogullzr/Welearn_Script) 的课件iframe、词库选择及原生退出流程；没有执行其代码，也未引入随机错误、默认假答案或伪造完成状态。
+
+真实公开课件验证：`et-blank .blank[contenteditable]` 的 editable 属性可为空字符串，标准答案在同一控件 `.key`；输入、keyup、blur/change 事件触发原生 Angular ngModel。已在匿名真实 Lead-in 页面确认5个填空均识别、填入及回读，Angular模型均非空，前后题目快照一致。所有非GET请求被拦截，没有写入真实账号的成绩或进度；匿名原生提交不能等同于真实账号的平台成功提交。
+
+等待课件iframe和Angular控件就绪；排除 visibility:hidden 的测量textarea，把 et-toggle 当作媒体开关。`notscored` 非计分主观题仍作为题目处理，结合本页已提供的 et-script 听力文本，未命中课件/缓存时按用户勾选的 AI 选项生成回答，不用默认假答案代填。只点击同一 et-item 内声明 `item.switchTab(0)` 的 Next，验证活动题页改变，至多20页且遵守每节总预算，不点击菜单的下一课。无交互阅读页使用自然访问和原生 ReturnMain 退出，再读取平台对应单元 iscomplete；未确认不报告完成。页面执行/填写数量与平台确认完成数量分别展示。
+
+WE Learn扫码修复保留：官方回调至少等待五秒，短暂文档替换/关闭弹窗后读取同一context存活官方标签；不重放code。一次HTTP等待结束且worker仍存活时继续等待未完成回复，不重复写命令。真实账号登录/提交仍需验收，不以合成回归或匿名页成功替代。
+
+已用该书真实公开 Task1 验证3个内部题页：单词表自然推进，1个非计分主观文本框以离线fixture回答验证填写机制，最后6个计分填空用各自.key自动填写并显示correct；没有调用真实付费AI或提交真实账号。Unit Goals自然阅读识别也已验证。口语 et-talk 单独提示录音，不再泛称零题不支持。

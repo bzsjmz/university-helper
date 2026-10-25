@@ -15,17 +15,20 @@ from app.services.course.english.login_view import blank_png, login_picture
 
 class BrowserLoginTest(unittest.TestCase):
     def run_flow(self, platform, commands=(), *, captcha=False, agreement=False):
-        host = 'welearn.sflep.com' if platform == 'welearn' else 'ucloud.unipus.cn'
+        host = 'welearn.sflep.com' if platform == 'welearn' else 'uai.unipus.cn'
         destination = '/student/index.aspx' if platform == 'welearn' else '/home'
         extra = ''
         if captcha:
             extra = '<input required placeholder="图形验证码" style="position:absolute;left:20px;top:105px;width:160px;height:30px">'
         if agreement:
             extra = '<input required type="checkbox" style="position:absolute;left:20px;top:105px;width:20px;height:20px">'
+        user_attrs = 'name="username"' if platform == 'welearn' else 'placeholder="请输入手机号、邮箱或用户名"'
+        pass_attrs = 'name="password"' if platform == 'welearn' else 'placeholder="请输入密码"'
+        login_label = '登录' if platform == 'welearn' else '登 录'
         form = f'''<html><body><form onsubmit="event.preventDefault();document.cookie='sid=fixture-cookie;path=/;Secure';location.href='https://{host}{destination}'">
-          <input name="username" style="position:absolute;left:20px;top:20px">
-          <input name="password" type="password" style="position:absolute;left:20px;top:60px">
-          {extra}<button style="position:absolute;left:20px;top:150px;width:160px;height:30px">登录</button>
+          <input {user_attrs} style="position:absolute;left:20px;top:20px">
+          <input {pass_attrs} type="password" style="position:absolute;left:20px;top:60px">
+          {extra}<button style="position:absolute;left:20px;top:150px;width:160px;height:30px">{login_label}</button>
           </form></body></html>'''
         catalog = 'https://u.unipus.cn/user/student/mycourse/courseCatalog?courseId=1'
         portal = f'<a href="{catalog}">My English</a><a href="https://evil.example/">Other site</a>'

@@ -28,7 +28,7 @@ q => {
     if (typeof value !== 'string') return null;
     value = norm(value);
     if (!value || /[<>|/;]/.test(value) || (q.type === 'completion' && /[,，]/.test(value)) ||
-      /^(?:\(?open\.?\)?|\(?answers? may vary\.?\)?|无标准答案|略)$/i.test(value)) return null;
+      /^(?:\(?open\.?\)?|\(?answers? (?:may|will) vary\.?\)?|无标准答案|略)$/i.test(value)) return null;
     return value;
   };
   const candidates = []; let uncertain = false;
@@ -75,6 +75,10 @@ q => {
     const answers = controls.map(e => decode(e.getAttribute('data-solution')));
     // WE courseware binds a hidden result node to one filling widget. Never
     // treat an unrelated page-wide result or a previous input value as an answer.
+    if (q.count === 1 && root.matches('et-blank')) {
+      const keys = [...root.querySelectorAll('.key')].filter(e => e.closest('et-blank') === root);
+      if (keys.length === 1) add([decode(keys[0].textContent)]);
+    }
     if (q.count === 1 && root.matches('[data-controltype="filling"], [data-controltype="fillinglong"]')) {
       const results = [...root.querySelectorAll('[data-itemtype="result"]')]
         .filter(e => e.closest('[data-controltype]') === root);
