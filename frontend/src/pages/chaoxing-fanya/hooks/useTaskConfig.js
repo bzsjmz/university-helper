@@ -18,8 +18,8 @@ export default function useTaskConfig() {
 
 
   // The backend consults persistent local answers before external queries.
-  // Query the anonymous answer bank before spending an AI request.
-  const [tikuProvider, setTikuProvider] = useState(['LocalCache', 'TikuGo', 'AI'])
+  // Keep that default visible, with AI as the only remote fallback.
+  const [tikuProvider, setTikuProvider] = useState(['LocalCache', 'AI'])
 
 
   const [tikuToken, setTikuToken] = useState('')

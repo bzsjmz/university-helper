@@ -211,18 +211,12 @@ export default function ConfigSection({
         </summary>
 
         <div className="mt-4 space-y-4">
-          <div className="flex flex-wrap gap-2" role="group" aria-label="题库方案">
-            <button type="button" className="rounded-lg border border-border px-3 py-2 text-sm"
-              onClick={() => setTikuProvider(['LocalCache', 'TikuGo', 'AI'])}>题库优先，AI 兜底</button>
-            <button type="button" className="rounded-lg border border-border px-3 py-2 text-sm"
-              onClick={() => setTikuProvider(['LocalCache', 'TikuGo'])}>仅本地和免费题库</button>
-          </div>
           <MultiPillGroup
             label="题库来源（按选择顺序回退）"
             options={TIKU_PROVIDERS}
             value={tikuProvider}
             onChange={setTikuProvider}
-            hint="前一个题库未命中时，按选择顺序回退到下一个。GO 可不填 Token；勾选 AI 后，题库未命中仍可能产生 AI 费用。仅免费题库不保证覆盖全部题目。"
+            hint="前一个题库未命中时，按选择顺序回退到下一个。"
           />
 
           <div>
