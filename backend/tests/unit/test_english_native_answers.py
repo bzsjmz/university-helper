@@ -24,6 +24,7 @@ def solver(tmp_path, monkeypatch):
     provider = Mock(_httpx_client=None)
     provider._query.return_value = 'B'
     monkeypatch.setattr(answering, 'get_provider', lambda: provider)
+    monkeypatch.setattr(answering.control, 'sleep', Mock())
     return EnglishSolver('welearn', 'course', True), provider
 
 

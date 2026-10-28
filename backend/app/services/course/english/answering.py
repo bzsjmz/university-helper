@@ -6,6 +6,7 @@ this cache, and failures are shared only with current concurrent waiters.
 """
 import json
 import os
+import random
 import threading
 
 from app.services.course.chaoxing import query_control as control
@@ -165,6 +166,13 @@ class EnglishSolver:
                 question['context'] + '\n' + question['title'] +
                 f"\n请按顺序给出恰好 {question['count']} 个答案。"),
                 'options': [f'{chr(65+i)}. {text}' for i, text in enumerate(question['options'])]}
+            if self.platform == 'welearn':
+                # Pace each new AI question, including the first, around 30s.
+                # Keep cancellation/deadlines active without occupying an API slot.
+                control.sleep(random.uniform(20.0, 40.0))
+                cached = native_cached()
+                if cached is not None:
+                    return cached
             # _query retains dual-key fallback, HTTP attempt/token limits and
             # usage telemetry, without Tiku.query's raw question/answer logging.
             raw = provider._query(prompt)

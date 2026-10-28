@@ -37,6 +37,7 @@ def solver(tmp_path, monkeypatch):
     provider._query.return_value = 'B'
     provider._httpx_client = None
     monkeypatch.setattr(answers, 'get_provider', lambda: provider)
+    monkeypatch.setattr(answers.control, 'sleep', Mock())
     return EnglishSolver('welearn', 'c', True), provider
 
 
