@@ -133,6 +133,26 @@ def test_homework_paging_uses_native_relation_fields_without_initial_integrity_r
     assert 'checkIntegrity' not in params and 'oldWorkId' not in params
 
 
+def test_explicit_homework_selection_never_enters_other_pending_assignment(service):
+    html=list_page().replace('Assessment','第二章进制作业')+list_page().replace('taskrefId=9','taskrefId=10').replace('Assessment','图灵故事PPT')
+    service.get=Mock(side_effect=[(html,ca.HOST),(paper(),WORK_URL)])
+    result=service.run(COURSE,homework=True,homework_titles=['第二章进制作业'])
+    assert result=={'submitted':1,'saved':0,'skipped':1,'failed':0}
+    assert service.session.post.call_count==1
+    assert len(service.get.call_args_list)==2
+
+
+def test_empty_homework_selection_does_not_enter_any_paper(service):
+    service.get=Mock(return_value=(list_page(),ca.HOST))
+    assert service.run(COURSE,homework=True,homework_titles=[])['skipped']==1
+    service.session.post.assert_not_called()
+
+
+def test_saved_task_schema_retains_explicit_homework_selection():
+    request=AccountTask(course_ids=['100'],course_homework=True,course_homework_titles=[' 第二章进制作业 '])
+    assert request.model_dump()['course_homework_titles']==['第二章进制作业']
+
+
 @pytest.mark.parametrize('status', ['已提交', '已完成', '待批阅', '待互评', '已结束', '未开始', '待重做'])
 def test_completed_unopened_and_retake_papers_are_never_entered(service, status):
     service.get = Mock(return_value=(list_page(status=status), ca.HOST))

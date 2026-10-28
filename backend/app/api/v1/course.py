@@ -60,6 +60,7 @@ class CourseStartRequest(BaseModel):
     chapter_limits: Annotated[dict[_ChapterLimitKey, _ChapterLimitValue], Field(max_length=100)] | None = None
     learn_chapters: StrictBool = True
     course_homework: StrictBool = False
+    course_homework_titles: Annotated[list[_ChapterLimitKey], Field(max_length=100)] | None = None
     course_exams: StrictBool = False
     speed: float = 1.0
     concurrency: int = 4

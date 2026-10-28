@@ -756,6 +756,7 @@ class ChaoxingLearningManager:
                     summary = CourseAssessmentService(chaoxing).run(
                         course, homework=payload.get("course_homework", False),
                         exams=payload.get("course_exams", False),
+                        homework_titles=payload.get("course_homework_titles"),
                         checkpoint=assessment_checkpoint, report=assessment_report)
                     for key, value in summary.items():
                         self._increase_progress(task_id, "assessments_" + key, value)

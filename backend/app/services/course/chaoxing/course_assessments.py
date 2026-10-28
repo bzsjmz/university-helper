@@ -433,7 +433,12 @@ class CourseAssessmentService:
         if response.status_code != 200 or not isinstance(result, dict) or result.get('status') not in (True, 1, 'true'):
             raise AssessmentUnavailable("平台未确认保存或提交成功，请人工核对")
 
-    def run(self, course, *, homework=False, exams=False, checkpoint=lambda: None, report=lambda *args: None):
+    def run(self, course, *, homework=False, exams=False, homework_titles=None,
+            checkpoint=lambda: None, report=lambda *args: None):
+        if homework_titles is not None and (not isinstance(homework_titles, list) or
+                any(not isinstance(title, str) or not title.strip() for title in homework_titles)):
+            raise ValueError('Homework selection must be a list of nonempty titles')
+        selected_titles = None if homework_titles is None else set(homework_titles)
         summary = {'submitted': 0, 'saved': 0, 'skipped': 0, 'failed': 0}
         for kind, enabled, label in [('homework', homework, '课程作业'), ('exam', exams, '课程考试')]:
             if not enabled:
@@ -455,6 +460,9 @@ class CourseAssessmentService:
                 continue
             for item in items:
                 checkpoint()
+                if kind == 'homework' and selected_titles is not None and item['title'] not in selected_titles:
+                    summary['skipped'] += 1
+                    continue
                 if item['skip']:
                     summary['skipped'] += 1
                     continue
