@@ -1,3 +1,9 @@
+> **Fork deployment:** use the [Agent deployment handbook](AGENT_DEPLOYMENT.md) for
+> `bzsjmz/university-helper`. This older document describes upstream infrastructure;
+> its fixed hosts, hotfix defaults and release images are not deployment targets or
+> instructions for this fork. / 本 fork 请使用 [Agent 部署手册](AGENT_DEPLOYMENT.md)，
+> 下文仅保留作上游历史参考，不能据此操作任何既有服务器。
+
 **Language:** English | [简体中文](#部署指南-简体中文)
 
 # Deployment Guide

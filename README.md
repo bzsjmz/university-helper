@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  <strong>Demo:</strong>
+  <strong>Upstream demo (not this fork’s deployment):</strong>
   <a href="https://shuake.cornna.xyz">shuake.cornna.xyz</a>
 </p>
 
@@ -27,10 +27,21 @@
   <sub><b>"You sleep, it studies."</b> A 60-second product film, rendered frame by frame with Remotion.</sub>
 </p>
 
-University Helper is a campus helper with a FastAPI backend and a React
-frontend. The repository is called `university-helper`, but some container
-names and env-var prefixes still use the old internal name `easy_learning`.
-We are renaming those over time.
+## Learning platforms and integration status
+
+This fork primarily maintains **Chaoxing / Fanya**, retains the inherited Chaoxing sign-in and Zhihuishu integrations, and provides **experimental WE Learn and U-campus AI 5.0 support**. It uses FastAPI and React. The status below describes committed source; check the running version and validate the selected course separately.
+
+| Learning platform | Status | Scope and limits |
+| --- | --- | --- |
+| Chaoxing / Fanya | Actively maintained; selected live courses verified | Multiple accounts, chapter ranges, supported media and exercises, ordinary course assignments/exams, history and restarts. Assignments/exams are separate opt-in scopes; closed, expired and verification-protected items remain manual. |
+| Chaoxing sign-in | Inherited support | Existing UI and APIs are retained; this fork has not verified every live sign-in workflow. |
+| Zhihuishu | Inherited support | Password/QR login and course tasks are retained; this fork has not completed a full live-course regression. |
+| WE Learn | **Experimental** | Login, course/lesson ranges, supported ET text exercises and internal tabs, native submission and completion reads. Selected live lessons have confirmed completion; loading, reading completion and special interactions still need work. Personal recordings remain manual. |
+| U-campus AI 5.0 | **Experimental** | Current portal login, bookshelf and supported course entry points. Live-material execution compatibility still needs acceptance testing; full platform coverage is not claimed. Legacy U-campus was removed. |
+
+WE Learn prefers courseware answers and cache hits. Each new AI question, including the first, waits a random **20–40 seconds** before the AI call; this uses the existing answer budget. New Chaoxing tasks default to `LocalCache → AI`; GO and Yanxi are not enabled by default. An answer hit, button click or local task ending does not prove platform completion.
+
+**Deploy this fork using the [Agent deployment handbook](./docs/AGENT_DEPLOYMENT.md)** (Chinese). It covers builds from a pinned commit, private configuration, persistent state, optional English browser sandboxing, idle upgrades, backups, verification and rollback. The upstream demo and prebuilt images do not establish the version deployed from this fork.
 
 Course assignment/exam scopes are opt-in and can run without chapters. They cover eligible unsubmitted items in selected courses, regardless of chapter limits. Only ordinary assignment papers and per-question exams are handled; verification/proctoring and unsupported layouts remain manual. Incomplete answers are saved without random fallback. Exam timers may continue while paused. Mock tests do not establish compatibility with every live course.
 
@@ -45,7 +56,7 @@ Course assignment/exam scopes are opt-in and can run without chapters. They cove
 | Task controls and history | Aggregated console, details, pause/stop and terminal-record deletion; encrypted restart configuration preserves the original scope and reads platform progress. A successful restart replaces its old record. Persisted history remains visible after the two-hour memory-cache expiry. After a first failure, managed tasks restart once after one hour with their original settings; another failure requires manual action. Existing unscheduled failures are not enrolled. |
 | Failures and threads | Failed chapters yield to later chapters and stop after at most three attempts; repeated video HTTP 403 responses use bounded recovery. Answer budgets, cooperative cancellation and worker cleanup reduce prolonged waits. |
 | AI and answer costs | Server-side DeepSeek defaults and primary/fallback keys; concurrent identical-query coalescing, question-type/option-order-aware caching and no repeated paid generation after a blank or malformed HTTP 200 response. Private attempt/token-usage telemetry excludes questions, answers and keys. |
-| Providers and concurrency | Process-wide GO request spacing and throttle cooldown; new-task defaults of 1.5x speed, two chapter workers and LocalCache→AI. The application task-count cap can be disabled and chapter concurrency has no application maximum; container resource limits remain a deployment concern. |
+| Providers and concurrency | New-task defaults of 1.5x speed, two chapter workers and LocalCache→AI; GO and Yanxi are not enabled by default. The application task-count cap can be disabled and chapter concurrency has no application maximum; container resource limits remain a deployment concern. |
 | Passive QQ status | A separate AstrBot plugin answers administrator `/任务状态` commands from owner-scoped sanitized snapshots, rejects stale data and does not push notifications or share database/authentication credentials. |
 
 Restarting creates new workers; it does not preserve execution threads across process restarts. Skipped failed chapters are not platform-confirmed completions. AI fallback may still incur charges on cache misses. Machine-specific credentials, runtime data, private operations configuration and backups are excluded from this repository. The inherited deployment and desktop instructions below refer to upstream capabilities; check actual fork releases for available prebuilt images and installers.
@@ -93,7 +104,9 @@ The app writes a log file, `desktop.log`, to `~/Library/Logs/xyz.cornna.shuake/`
 on macOS, `%LOCALAPPDATA%\xyz.cornna.shuake\logs\` on Windows and
 `~/.local/share/xyz.cornna.shuake/logs/` on Linux.
 
-### One-command server deploy
+### Upstream release installation (reference)
+
+> To deploy this fork, use the [Agent deployment handbook](./docs/AGENT_DEPLOYMENT.md) and build app/web from the approved commit. The inherited installer below downloads upstream artifacts and may omit this fork’s extensions.
 
 On a clean server, install Docker and run the deploy script. It writes `.env`
 with random secrets, pulls the prebuilt images from GHCR, starts Postgres, the
@@ -169,123 +182,9 @@ make test                    # pytest + vitest
 
 On Windows, run these inside WSL2 with Docker Desktop's WSL integration turned on.
 
-## For AI agents
+## For deployment agents
 
-Follow these steps when a user asks you to install University Helper. Run the
-commands yourself and report what each check printed.
-
-### 1. Pick the edition
-
-- One person on their own computer: use the desktop app (step 7). It needs no
-  Docker and no account.
-- A shared server that several people open in a browser: use the server
-  edition (steps 2 to 6).
-
-### 2. Check the machine
-
-```bash
-docker info >/dev/null && echo "docker daemon ok"
-docker compose version
-curl --version | head -n 1
-openssl version                        # generates the secrets on first install
-
-# Port 8080 must be free. No output means free.
-ss -ltn 'sport = :8080' | tail -n +2   # Linux
-lsof -nP -iTCP:8080 -sTCP:LISTEN       # macOS
-```
-
-On Windows, check with `docker info`, `docker compose version` and
-`Get-NetTCPConnection -LocalPort 8080 -State Listen -ErrorAction SilentlyContinue`.
-If 8080 is taken, add `--port <free port>` (`-Port`) below and use that port in
-every later URL.
-
-### 3. Install without prompts
-
-Always pass `-y` (`-Yes`). Without a terminal the script treats every question
-as "no". Pick one line, and ask the user for the administrator email:
-
-```bash
-# local only
-curl -fsSL https://github.com/sweetcornna/university-helper/releases/latest/download/deploy_server.sh | bash -s -- -y --admin-email admin@example.com
-# public IP, plain http
-curl -fsSL https://github.com/sweetcornna/university-helper/releases/latest/download/deploy_server.sh | bash -s -- -y --host 203.0.113.10 --admin-email admin@example.com
-# domain; afterwards follow the nginx/certbot steps the script prints
-curl -fsSL https://github.com/sweetcornna/university-helper/releases/latest/download/deploy_server.sh | bash -s -- -y --domain example.com --admin-email admin@example.com
-```
-
-```powershell
-Invoke-WebRequest -UseBasicParsing https://github.com/sweetcornna/university-helper/releases/latest/download/deploy_server.ps1 -OutFile deploy_server.ps1
-powershell -ExecutionPolicy Bypass -File deploy_server.ps1 -Yes -AdminEmail admin@example.com
-```
-
-The files land in `./university-helper`. Run every later `docker compose` and
-`scripts/` command from that directory.
-
-### 4. Verify
-
-```bash
-curl -fsS http://127.0.0.1:8080/health
-```
-
-Expect `"status":"ok"` and `"schema":"ok"`. Right after a start, `schema` can
-read `unknown` for a few seconds; retry for up to a minute. `missing_users` or
-`missing_tenant_template` means registration will fail (see the table below).
-
-Then register the first account. Usernames are 3 to 30 characters of `a-z` and
-`0-9`. Passwords need at least 8 characters with an uppercase letter, a
-lowercase letter and a digit.
-
-```bash
-curl -sS -w '\nHTTP %{http_code}\n' -X POST http://127.0.0.1:8080/api/v1/auth/register \
-  -H 'Content-Type: application/json' \
-  -d '{"username":"admin","email":"admin@example.com","password":"ChangeMe123"}'
-```
-
-Expect `HTTP 201` and a JSON body with `access_token`. This account is an
-administrator if its email is in `--admin-email`, or if no admin email was set
-and it is the first account. To confirm, call
-`GET /api/v1/system/update` with `Authorization: Bearer <access_token>`:
-administrators get `200`, everyone else `403`. Registration is rate limited,
-so on `429` wait a minute before retrying.
-
-### 5. Fix common failures
-
-| What you see | Fix |
-|---|---|
-| `400` with `"code":"InvalidHost"` or "Invalid host header" | The site was opened through a hostname or IP that is not in `CORS_ORIGINS` or `ALLOWED_HOSTS`. Re-run the install with `--allowed-hosts <host1,host2>`. |
-| Register returns `503` "数据库还没初始化好", or `/health` shows `missing_users` / `missing_tenant_template` | The app creates the missing schema when it starts. Run `docker compose -p university-helper -f docker-compose.release.yml restart app`, wait for `"schema":"ok"`, then check `docker compose -p university-helper -f docker-compose.release.yml logs --tail=80 app postgres` if it stays broken. |
-| Register returns `503` about CREATEDB | The database account cannot create databases. Grant `CREATEDB` to the Postgres role the app uses. |
-| Start fails with "port is already allocated" or "address already in use" | Re-run with `--port <free port>`. |
-| "Docker is running but this user cannot use it" | Run `sudo usermod -aG docker "$USER"`, log out and back in, then re-run. |
-| "ENV=production requires https:// CORS_ORIGINS" | Use `--domain` for https, or `--host <ip>` for plain http. |
-
-### 6. Don't
-
-- Don't delete `.env` or the `university-helper_shuake-postgres-data` volume,
-  and don't run `docker compose down -v`. `.env` holds the database password
-  and `CREDENTIAL_ENCRYPTION_KEY`; without them the existing data can't be
-  opened. The script refuses to continue when the volume exists but `.env` is
-  gone.
-- Don't set `ENV=production` for a site served over plain http on an IP. In
-  production the app refuses to start with `http://` origins other than
-  localhost. Use `--host` instead, which keeps `ENV=dev`.
-- Don't set `ALLOWED_HOSTS=*` in production; the app refuses that too.
-- Never commit `.env`. Back it up somewhere private.
-
-### 7. Desktop app
-
-Download the file for the user's OS from the latest release, for example
-`gh release download --repo sweetcornna/university-helper --pattern 'xuedao_*_darwin_aarch64.dmg'`:
-
-- Windows: `xuedao_<ver>_windows_x64-setup.exe` (or `xuedao_<ver>_windows_x64.msi`)
-- macOS: `xuedao_<ver>_darwin_aarch64.dmg` (Apple Silicon) or `xuedao_<ver>_darwin_x64.dmg` (Intel)
-- Linux: `xuedao_<ver>_linux_amd64.AppImage` or `xuedao_<ver>_linux_amd64.deb`
-
-If macOS says the app is damaged, move it to `/Applications` and run
-`xattr -dr com.apple.quarantine "/Applications/学道.app"`. When something goes
-wrong, read `desktop.log` in `~/Library/Logs/xyz.cornna.shuake/` (macOS),
-`%LOCALAPPDATA%\xyz.cornna.shuake\logs\` (Windows) or
-`~/.local/share/xyz.cornna.shuake/logs/` (Linux).
+Read the [Agent deployment handbook](./docs/AGENT_DEPLOYMENT.md) before acting. Check the target host’s rules, source commit, running images, all active/scheduled tasks and data ownership. Fresh installation and upgrades have different steps; wait for idle unless interrupting current tasks is authorized. The handbook contains no maintainer credentials or private runtime configuration.
 
 ## Highlights
 
@@ -320,7 +219,7 @@ scripts/        setup / test / backup / hotfix-publish helpers
   Docker image build. CodeQL runs separately. Trivy and `npm audit` are
   report-only; `mypy` is not currently run by CI.
 
-## Supported platforms
+## Operating systems and access
 
 The desktop app runs natively on Windows, macOS and Linux. The server edition
 is a web app: Linux is the production target, and it runs anywhere Docker
@@ -412,67 +311,17 @@ such as a bank without a token or an LLM without a key, are dropped from the
 chain, so the chain keeps working as long as one provider does.
 
 ```jsonc
-// tiku_config: try 言溪 first, then fall back to the free GO题库
-{ "provider": "TikuYanxi,TikuGo", "token": "<yanxi-token>" }
+// Fork default: local answers first, then configured server AI on a miss
+{ "provider": "LocalCache,AI" }
 ```
 
-> The shared answer cache is checked before any provider, so `LocalCache` only
-> helps when it is selected on its own (cache-only mode).
+> The shared cache and an installed offline bank are checked first. `LocalCache` supports an offline-only mode and remains the first entry in the default chain; AI fallback may incur charges. The table lists optional adapters, not a recommendation to enable or purchase GO, Yanxi or other services.
 
 ## Deployment details
 
-> [`docs/DEPLOYMENT.md`](./docs/DEPLOYMENT.md) is the full deployment guide.
+Use the [Agent deployment handbook](./docs/AGENT_DEPLOYMENT.md) for this fork’s installation, upgrades and rollback. Build app and web from a pinned commit and record source and runtime image versions separately. English trials additionally need a browser runtime and a verified sandbox; the ordinary backend image does not include them.
 
-Every release publishes multi-arch (amd64 + arm64) images to GHCR, so there is
-nothing to compile:
-
-- `ghcr.io/sweetcornna/university-helper-app`: the FastAPI backend
-- `ghcr.io/sweetcornna/university-helper-web`: nginx with the built SPA
-
-Release image tags have no leading `v` (`1.4.7`, not `v1.4.7`). The deploy
-scripts accept either form.
-
-### When registration fails
-
-Registration needs the `users` table and the `tenant_template` database.
-`curl http://127.0.0.1:8080/health` reports both in its `schema` field: `ok`,
-`missing_users`, `missing_tenant_template` or `unknown` (the database could not
-be checked). The app repairs a missing schema when it starts, so restarting the
-`app` container is the first thing to try. The register page shows the
-server's message, and the app log has the details. For an install made by the
-deploy script:
-
-```bash
-docker compose -p university-helper -f docker-compose.release.yml restart app
-docker compose -p university-helper -f docker-compose.release.yml logs --tail=80 app postgres
-```
-
-If the site is opened through an address the server doesn't know, the error
-says "Invalid host header". Add that address with `--allowed-hosts`, or to
-`ALLOWED_HOSTS` in `.env`, and re-run the deploy script.
-
-### Manual (build from source)
-
-This path runs Compose from the source tree behind host nginx. Install Docker
-Compose and Node.js 20 (the version in `.nvmrc`) first. `Dockerfile.server`
-only builds the backend, so build the SPA on the host before nginx serves it.
-
-```bash
-install -m 600 .env.example .env  # fill SECRET_KEY, POSTGRES_PASSWORD, CREDENTIAL_ENCRYPTION_KEY, CORS_ORIGINS
-node --version              # must report 20.x
-cd frontend && npm ci && npm run build
-cd ..                       # return to the repository root
-docker compose -f docker-compose.server.yml -p university-helper up -d --build
-```
-
-Check that `frontend/dist/` exists before pointing host nginx at it.
-
-To hotfix individual files in the remote production checkout and rebuild the
-app service (SSH key auth preferred):
-
-```bash
-SERVER_IP=… SSH_KEY=~/.ssh/uh ./scripts/hotfix_publish.sh backend/app/main.py
-```
+The [older deployment guide](./docs/DEPLOYMENT.md) describes upstream infrastructure and remains historical reference. Do not apply its fixed hosts, hotfix defaults or image addresses to this fork. Back up databases, the Fernet key, private configuration and state together. Before replacing app, check active/paused tasks, scheduled retries and English workers, then update only the authorized services.
 
 ## Security
 
@@ -515,8 +364,7 @@ issue.
 
 [MIT](./LICENSE)
 
-### 英语平台试用
+### English platform trials
 
-新增 WE Learn 和 U校园 AI版入口（老版已移除），默认账号密码登录；验证码在本页完成，自动读取课程，无需复制 Cookie/JSON 或课程网址。高级选项保留会话导入。
-支持按起点至终点顺序执行各课节的自动答题/普通作业保存，完整答案可显式选择自动提交；WE Learn 优先读取明确绑定的课件标答，再查缓存，最后才使用已启用的 AI，保留双 Key 与费用/超时控制。
-两平台自动答题均需浏览器运行环境，已通过离线 Chromium 沙箱和表单保存验证；暂不支持自动考试或跨页遍历，尚未用真实账号验证。详情与第三方许可见 [接入说明](docs/english-learning.md)。
+WE Learn and U-campus AI 5.0 remain experimental. The committed implementation uses isolated browsers for supported lessons in the selected range. WE Learn supports declared ET internal tabs, native submission confirmation and platform completion reads; this does not establish compatibility with every course. Recordings, unknown controls, loading failures and unconfirmed completion can still require manual handling.
+Each new WE Learn AI question waits 20–40 seconds before the call; courseware and cache hits skip the wait. The ordinary backend image does not include Playwright/Chromium. See the [Agent handbook](docs/AGENT_DEPLOYMENT.md) for deployment requirements and the [integration notes](docs/english-learning.md) for details and licensing.

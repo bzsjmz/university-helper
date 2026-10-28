@@ -3,7 +3,7 @@
 # University Helper
 
 <p align="center">
-  <strong>演示网站：</strong>
+  <strong>上游演示网站（非本 fork 实例）：</strong>
   <a href="https://shuake.cornna.xyz">shuake.cornna.xyz</a>
 </p>
 
@@ -13,7 +13,21 @@
   <sub><b>「你睡觉，它上课」</b> 60 秒产品宣传片，用 Remotion 逐帧渲染。</sub>
 </p>
 
-University Helper 是一个校园辅助项目，后端用 FastAPI，前端用 React。仓库名是 `university-helper`，但部分源码目录还沿用旧的内部名称 `easy_learning`。
+## 学习平台与接入状态
+
+本 fork 主要维护学习通 / 泛雅，保留学习通签到和智慧树入口，并提供 **WE Learn、U校园 AI版 5.0 测试接入**。后端为 FastAPI，前端为 React。以下状态以本仓库已提交实现为准，不能替代目标服务器的版本核对或真实课程验收。
+
+| 学习平台 | 当前状态 | 支持范围与边界 |
+| --- | --- | --- |
+| 学习通 / 泛雅 | 主要维护，部分真实课程已验证 | 多账号、章节范围、视频/文档与已适配练习、普通课程作业/考试、任务历史与重新启动；作业/考试单独勾选，未开放、已截止及验证要求保留人工处理。 |
+| 学习通签到 | 沿用上游支持 | 签到页面与接口保留，本 fork 尚未逐项完成真实场景验收。 |
+| 智慧树 | 沿用上游支持 | 账号/二维码登录与课程任务入口保留，本 fork 尚未逐项完成真实课程回归。 |
+| WE Learn | **测试中** | 登录、课程/课节范围、已适配 ET 文本练习与内部翻页、原生提交及完成回读；部分真实课节已确认完成，加载、阅读完成判定与特殊交互仍待完善，本人录音需人工。 |
+| U校园 AI版 5.0 | **测试中** | 5.0 门户登录、书架与已适配课程入口；真实教材的执行兼容性仍需验收，不能宣称全平台可用；旧版 U校园已移除。 |
+
+WE Learn 优先课件答案和缓存；每道新 AI 题（含首题）调用前随机等待 **20–40 秒**，计入答题预算。学习通新任务默认 `LocalCache → AI`，GO / 言溪不默认启用。答案命中、按钮点击和本地执行结束均不等于平台确认完成。
+
+**部署本 fork：先读 [Agent 部署手册](./docs/AGENT_DEPLOYMENT.md)**。手册覆盖固定提交的源码构建、私有配置、状态持久化、可选英语浏览器沙箱、空闲升级、备份、验收与回滚。上游演示站和预构建镜像不代表本 fork 的部署版本。
 
 ## 本 fork 与原仓库的区别
 
@@ -26,7 +40,7 @@ University Helper 是一个校园辅助项目，后端用 FastAPI，前端用 Re
 | 任务控制与历史 | 聚合控制台、详情、暂停/停止、终态记录删除；保存加密启动配置，重新启动沿用原范围并读取平台进度，新任务启动成功后替换对应旧记录。历史列表从数据库补读，避免终态记录超过两小时后消失。首次失败后等待一小时自动按原配置重启一次，再次失败保留记录等待人工处理；只应用于此策略启用后发生的失败。 |
 | 失败与线程处理 | 失败章节先让后续章节执行，最多三次尝试后保留失败并跳过；视频连续 403 有界刷新重试。答题预算、协作取消与 worker 回收减少长时间等待。 |
 | AI 与答题费用 | 后端配置 DeepSeek 默认参数和优先/回退双 Key；同题并发合并、题型/选项顺序安全缓存，避免 HTTP 200 空白或解析失败后再次付费生成；记录不含题目、答案或 Key 的请求尝试/token usage。 |
-| 题库与并发 | GO 查询使用进程共享门禁和限流冷却；新任务默认 1.5 倍速、2 章节并发、LocalCache→AI。可配置关闭应用任务数量上限，章节并发无应用最大值，容器资源限制仍需由部署者设置。 |
+| 题库与并发 | 新任务默认 1.5 倍速、2 章节并发、LocalCache→AI；GO / 言溪不默认启用。可配置关闭应用任务数量上限，章节并发无应用最大值，容器资源限制仍需由部署者设置。 |
 | 被动 QQ 状态 | 独立 AstrBot 插件响应管理员 `/任务状态`，读取指定管理用户的脱敏快照并拒绝过期数据；不主动推送，不共享数据库或认证凭据。 |
 
 课程作业和考试覆盖所选课程当前可处理的未提交项目，**不受章节终点限制**。新功能支持普通作业试卷和逐题考试页面；平台布局或协议变化可能需要适配。已提交、未开放、已截止及重考项目不自动进入；验证码、人脸、口令、监考或指定客户端要求保留人工处理。作业/考试答案未全部匹配时仅保存并提示未完成，不随机补答案，也不在再次执行时降低提交条件。仅保存模式不交卷；考试进入后平台限时仍可能继续，暂停和服务重启不会暂停平台计时。模拟回归不等于已验证每个真实课程的兼容性。
@@ -59,7 +73,9 @@ open "/Applications/学道.app"
 
 桌面端的日志文件是 `desktop.log`，位置：macOS 在 `~/Library/Logs/xyz.cornna.shuake/`，Windows 在 `%LOCALAPPDATA%\xyz.cornna.shuake\logs\`，Linux 在 `~/.local/share/xyz.cornna.shuake/logs/`。
 
-### 一键部署服务端
+### 上游 Release 安装（参考）
+
+> 本 fork 的服务器安装请优先使用 [Agent 部署手册](./docs/AGENT_DEPLOYMENT.md)，从批准的提交构建 app/web。下面保留的安装器默认下载上游产物，不保证包含本 fork 扩展。
 
 新服务器装好 Docker 后，运行部署脚本即可。脚本会生成带随机密钥的 `.env`，从 GHCR 拉取预构建镜像，启动 Postgres、后端和 web 容器，并等 `/health` 通过。不需要先 git clone：脚本单独运行时，会先把对应版本的源码下载到 `./university-helper`（可用 `UH_INSTALL_DIR` 改位置）。
 
@@ -118,95 +134,9 @@ make test                    # 运行后端 + 前端测试
 
 Windows 用户请在 WSL2 里运行这些命令，并打开 Docker Desktop 的 WSL 集成。
 
-## 给 AI Agent 的安装指引
+## 给 AI Agent 的部署入口
 
-用户让你安装 University Helper 时，按下面的步骤做。命令由你来执行，并把每一步检查的输出告诉用户。
-
-### 1. 选版本
-
-- 一个人在自己电脑上用：装桌面端（第 7 步），不需要 Docker，也不用注册账号。
-- 多人通过浏览器访问的服务器：装服务端（第 2 到 6 步）。
-
-### 2. 检查环境
-
-```bash
-docker info >/dev/null && echo "docker daemon ok"
-docker compose version
-curl --version | head -n 1
-openssl version                        # 首次安装时用来生成密钥
-
-# 8080 端口必须空闲，没有输出就是空闲
-ss -ltn 'sport = :8080' | tail -n +2   # Linux
-lsof -nP -iTCP:8080 -sTCP:LISTEN       # macOS
-```
-
-Windows 上用 `docker info`、`docker compose version` 和 `Get-NetTCPConnection -LocalPort 8080 -State Listen -ErrorAction SilentlyContinue` 检查。8080 被占用时，下面的命令加上 `--port <空闲端口>`（`-Port`），后面所有地址也换成这个端口。
-
-### 3. 无交互安装
-
-一定要加 `-y`（`-Yes`）。没有终端时，脚本会把所有提问都当成「否」。管理员邮箱向用户确认后，选一条执行：
-
-```bash
-# 仅本机访问
-curl -fsSL https://github.com/sweetcornna/university-helper/releases/latest/download/deploy_server.sh | bash -s -- -y --admin-email admin@example.com
-# 公网 IP，纯 http
-curl -fsSL https://github.com/sweetcornna/university-helper/releases/latest/download/deploy_server.sh | bash -s -- -y --host 203.0.113.10 --admin-email admin@example.com
-# 域名；装完后按脚本输出的 nginx/certbot 步骤配置 TLS
-curl -fsSL https://github.com/sweetcornna/university-helper/releases/latest/download/deploy_server.sh | bash -s -- -y --domain example.com --admin-email admin@example.com
-```
-
-```powershell
-Invoke-WebRequest -UseBasicParsing https://github.com/sweetcornna/university-helper/releases/latest/download/deploy_server.ps1 -OutFile deploy_server.ps1
-powershell -ExecutionPolicy Bypass -File deploy_server.ps1 -Yes -AdminEmail admin@example.com
-```
-
-文件会装到 `./university-helper`，之后的 `docker compose` 和 `scripts/` 命令都在这个目录里执行。
-
-### 4. 验收
-
-```bash
-curl -fsS http://127.0.0.1:8080/health
-```
-
-应该看到 `"status":"ok"` 和 `"schema":"ok"`。刚启动的几秒里 `schema` 可能是 `unknown`，最多重试一分钟。如果是 `missing_users` 或 `missing_tenant_template`，注册会失败，按下面的表处理。
-
-然后注册第一个账号。用户名 3 到 30 个字符，只能用 `a-z` 和 `0-9`；密码至少 8 位，要包含大写字母、小写字母和数字。
-
-```bash
-curl -sS -w '\nHTTP %{http_code}\n' -X POST http://127.0.0.1:8080/api/v1/auth/register \
-  -H 'Content-Type: application/json' \
-  -d '{"username":"admin","email":"admin@example.com","password":"ChangeMe123"}'
-```
-
-应该返回 `HTTP 201`，响应 JSON 里有 `access_token`。如果这个账号的邮箱在 `--admin-email` 里，或者没配置管理员邮箱而它是第一个账号，它就是管理员。可以带上 `Authorization: Bearer <access_token>` 请求 `GET /api/v1/system/update` 确认：管理员返回 `200`，其他账号返回 `403`。注册接口有限流，返回 `429` 时等一分钟再试。
-
-### 5. 常见问题
-
-| 现象 | 处理 |
-|---|---|
-| 返回 `400`，内容有 `"code":"InvalidHost"` 或「Invalid host header」 | 打开网站用的域名或 IP 不在 `CORS_ORIGINS` 或 `ALLOWED_HOSTS` 里。带上 `--allowed-hosts <host1,host2>` 重新运行安装命令。 |
-| 注册返回 `503`「数据库还没初始化好」，或 `/health` 显示 `missing_users` / `missing_tenant_template` | 应用启动时会补建缺失的表和模板库。执行 `docker compose -p university-helper -f docker-compose.release.yml restart app`，等 `"schema":"ok"`；还不行就看 `docker compose -p university-helper -f docker-compose.release.yml logs --tail=80 app postgres`。 |
-| 注册返回 `503`，提示没有建库权限（CREATEDB） | 应用连接数据库用的 Postgres 账号不能建库，给它授予 `CREATEDB`。 |
-| 启动时报「port is already allocated」或「address already in use」 | 换个端口，加 `--port <空闲端口>` 重新运行。 |
-| 「Docker is running but this user cannot use it」 | 执行 `sudo usermod -aG docker "$USER"`，退出重新登录后再运行。 |
-| 「ENV=production requires https:// CORS_ORIGINS」 | 有域名用 `--domain`（https），只有 IP 用 `--host <ip>`（纯 http）。 |
-
-### 6. 不要做的事
-
-- 不要删除 `.env` 或 `university-helper_shuake-postgres-data` 数据卷，也不要执行 `docker compose down -v`。`.env` 里有数据库密码和 `CREDENTIAL_ENCRYPTION_KEY`，丢了就打不开已有数据。数据卷还在而 `.env` 没了时，脚本会拒绝继续。
-- 不要在用 IP 走纯 http 访问的站点上设 `ENV=production`。生产模式下，除 localhost 以外的 `http://` 来源会让应用拒绝启动。这种情况用 `--host`，它会保持 `ENV=dev`。
-- 生产环境不要设 `ALLOWED_HOSTS=*`，应用同样会拒绝启动。
-- 永远不要把 `.env` 提交到仓库，把它备份到私密的地方。
-
-### 7. 桌面端
-
-从最新 Release 下载对应系统的文件，例如 `gh release download --repo sweetcornna/university-helper --pattern 'xuedao_*_darwin_aarch64.dmg'`：
-
-- Windows：`xuedao_<ver>_windows_x64-setup.exe`（或 `xuedao_<ver>_windows_x64.msi`）
-- macOS：`xuedao_<ver>_darwin_aarch64.dmg`（Apple Silicon）或 `xuedao_<ver>_darwin_x64.dmg`（Intel）
-- Linux：`xuedao_<ver>_linux_amd64.AppImage` 或 `xuedao_<ver>_linux_amd64.deb`
-
-macOS 提示 App 已损坏时，先把它移到 `/Applications`，再执行 `xattr -dr com.apple.quarantine "/Applications/学道.app"`。出问题时看 `desktop.log`：macOS 在 `~/Library/Logs/xyz.cornna.shuake/`，Windows 在 `%LOCALAPPDATA%\xyz.cornna.shuake\logs\`，Linux 在 `~/.local/share/xyz.cornna.shuake/logs/`。
+请完整阅读 [Agent 部署手册](./docs/AGENT_DEPLOYMENT.md)，按目标主机规则核对提交、镜像、任务与数据归属后执行。新装和既有实例升级分别处理；已有任务未获中断授权时等待空闲。文档不包含任何维护者私有配置，也不授权操作上游服务器。
 
 ## 功能概览
 
@@ -236,7 +166,7 @@ scripts/        安装、测试、备份、部署脚本
 - 数据层：PostgreSQL 15
 - 部署：Docker / Docker Compose + nginx
 
-## 支持平台
+## 操作系统与访问方式
 
 桌面端可以在 Windows、macOS、Linux 上原生运行。服务端是 Web 应用，生产环境以 Linux 为主，任何装了 Docker 的机器都能用下文的多架构镜像一条命令跑起来。包括安卓在内的任何设备，都可以通过浏览器或安装好的 PWA 访问服务端。
 
@@ -284,11 +214,11 @@ scripts/        安装、测试、备份、部署脚本
 `provider` 也可以写成逗号分隔的有序列表。前一个题库没查到，或者返回的答案和题型对不上，就换下一个。无法初始化的题库（比如缺 Token 的题库、缺 key 的大模型）会被自动移出回退链，所以链上只要还有一个能用，整条链就能用。
 
 ```jsonc
-// tiku_config：先查言溪，没查到再用免费的 GO题库
-{ "provider": "TikuYanxi,TikuGo", "token": "<言溪 token>" }
+// 本 fork 默认链：先查本地，未命中才使用已配置的服务器 AI
+{ "provider": "LocalCache,AI" }
 ```
 
-> 答案缓存总是在所有题库之前查一次，所以 `LocalCache` 只有单独选用（纯缓存模式）时才有用，放进回退链里没有意义。
+> 共享缓存和已安装的本地题库优先查询。`LocalCache` 可单独用于不调用外部 API 的模式，也保留在默认链首位；AI 未命中兜底可能收费。上表列的是可选适配器，不是启用或购买 GO / 言溪等服务的建议。
 
 ## 开发细节
 
@@ -312,41 +242,9 @@ npm run dev                  # http://localhost:3000，/api 代理到 :8000
 
 ## 部署细节
 
-> 完整的部署文档见 [`docs/DEPLOYMENT.md`](./docs/DEPLOYMENT.md)。
+本 fork 的新装、升级和回滚统一见 [Agent 部署手册](./docs/AGENT_DEPLOYMENT.md)。使用本仓库固定提交构建后端与前端，分别记录源码和实际镜像版本。英语试用额外需要浏览器及经过验证的沙箱环境，普通后端镜像并不包含它们。
 
-每次发版都会向 GHCR 推送多架构（amd64 + arm64）镜像，不需要本地编译：
-
-- `ghcr.io/sweetcornna/university-helper-app`：FastAPI 后端
-- `ghcr.io/sweetcornna/university-helper-web`：nginx 和构建好的前端
-
-Release 镜像 tag 不带前缀 `v`（是 `1.4.7`，不是 `v1.4.7`）。部署脚本两种写法都接受。
-
-### 注册失败怎么查
-
-注册需要 `users` 表和 `tenant_template` 模板库。`curl http://127.0.0.1:8080/health` 返回的 `schema` 字段会说明它们的状态：`ok`、`missing_users`、`missing_tenant_template`，或者 `unknown`（检查不了数据库）。应用启动时会补建缺失的部分，所以第一步先重启 `app` 容器。注册页会显示服务端返回的原因，详细信息在应用日志里。用部署脚本安装的话：
-
-```bash
-docker compose -p university-helper -f docker-compose.release.yml restart app
-docker compose -p university-helper -f docker-compose.release.yml logs --tail=80 app postgres
-```
-
-如果打开网站用的地址服务端不认识，会报「Invalid host header」。用 `--allowed-hosts` 或在 `.env` 的 `ALLOWED_HOSTS` 里加上这个地址，再运行一次部署脚本。
-
-### 手动部署（从源码构建）
-
-这种方式是宿主机 nginx 加源码目录里的 Compose，需要先装好 Docker Compose 和 Node.js 20（版本以 `.nvmrc` 为准）。`Dockerfile.server` 只构建后端，所以要先在宿主机上构建前端静态文件，再交给 nginx。
-
-```bash
-install -m 600 .env.example .env
-node --version              # 必须是 20.x
-cd frontend && npm ci && npm run build
-cd ..                       # 回到仓库根目录
-docker compose -f docker-compose.server.yml -p university-helper up -d --build
-```
-
-确认 `frontend/dist/` 已经生成，再配置宿主机 nginx 指向这个目录。
-
-仓库根目录的 `.env.example` 是按 `docker-compose.server.yml` 写的。`scripts/_legacy/` 里的旧 `deploy.*` 脚本不要运行。生产环境的增量更新用 `scripts/hotfix_publish.sh`。
+[旧部署文档](./docs/DEPLOYMENT.md) 描述上游环境，仅作历史参考；不要将其中固定主机、热修复脚本或镜像地址直接用于本 fork。数据库、Fernet 密钥、状态目录和私有配置必须一起备份；更新 app 前检查所有活动/暂停任务、定时重试和英语 worker，按授权范围更新目标服务。
 
 ## 测试
 
@@ -388,6 +286,5 @@ cd frontend && npm run lint
 
 ### 英语平台试用
 
-新增 WE Learn 和 U校园 AI版入口（老版已移除），默认账号密码登录；验证码在本页完成，自动读取课程，无需复制 Cookie/JSON 或课程网址。高级选项保留会话导入。
-支持按起点至终点顺序执行各课节的自动答题/普通作业保存，完整答案可显式选择自动提交；WE Learn 优先读取明确绑定的课件标答，再查缓存，最后才使用已启用的 AI，保留双 Key 与费用/超时控制。
-两平台自动答题均需浏览器运行环境，已通过离线 Chromium 沙箱和表单保存验证；暂不支持自动考试或跨页遍历，尚未用真实账号验证。详情与第三方许可见 [接入说明](docs/english-learning.md)。
+WE Learn 和 U校园 AI版 5.0 仍处于测试中。当前提交使用隔离浏览器执行所选范围内已适配课节；WE Learn 支持已声明的 ET 内部题页切换、原生提交确认和平台完成回读，不能等同于全教材兼容。录音、未知控件、加载失败及完成未确认会分别提示人工处理。
+WE Learn 的新 AI 题目调用前随机等待 20–40 秒，课件答案与缓存命中不等待。普通后端镜像不含 Playwright/Chromium，部署要求见 [Agent 手册](docs/AGENT_DEPLOYMENT.md)，接入细节与许可见 [接入说明](docs/english-learning.md)。

@@ -1,5 +1,10 @@
 # Platform support
 
+This page describes operating systems and inherited distribution options. For this
+fork’s learning-platform status, see the [README](../README.md#learning-platforms-and-integration-status).
+Deploy the fork using the [Agent deployment handbook](AGENT_DEPLOYMENT.md); the
+upstream installers and hotfix commands below remain historical reference.
+
 University Helper comes in two forms. The server edition is a web application (FastAPI backend, React/Vite frontend, PostgreSQL) meant for a Linux server. The desktop app (学道) packages the same backend for one user on Windows, macOS or Linux and needs no Docker, Postgres or Python. Android users open the server edition in the browser or install it as a PWA.
 
 ## Support matrix
