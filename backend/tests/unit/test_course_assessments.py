@@ -68,6 +68,71 @@ def test_defaults_do_not_read_or_submit_assessments(service):
     service.session.post.assert_not_called()
 
 
+def test_actual_mobile_homework_entry_and_mixed_unavailable_rows(service):
+    entry = '/mooc-ans/android/mtaskmsgspecial?taskrefId=9&courseId=100&clazzId=200&type=1'
+    html = ('<ul class="nav">'
+            f'<li data="{entry}"><p>第二章进制作业</p><span>未交</span><em>剩余435小时</em></li>'
+            f'<li data="{entry.replace("taskrefId=9", "taskrefId=10")}"><p>旧作业</p><span>已过期</span></li>'
+            f'<li data="{entry.replace("taskrefId=9", "taskrefId=11")}"><p>未来作业</p><span>未开始</span></li>'
+            '</ul>')
+    service.get = Mock(side_effect=[(html, ca.HOST), (paper(), WORK_URL)])
+    result = service.run(COURSE, homework=True)
+    assert result == {'submitted': 1, 'saved': 0, 'skipped': 2, 'failed': 0}
+    assert service.session.post.call_count == 1
+    assert '/mooc-ans/android/mtaskmsgspecial?' in service.get.call_args_list[1].args[0]
+
+
+def test_official_mobile_exam_list_redirect_is_followed(service):
+    service.session.get.side_effect = [
+        SimpleNamespace(status_code=302, headers={'Location': '/exam-ans/exam/phone/task-list?courseId=100&classId=200&cpi=300'}),
+        SimpleNamespace(status_code=200, text='<p>暂无考试</p>'),
+    ]
+    assert service.run(COURSE, exams=True)['failed'] == 0
+    assert service.session.get.call_count == 2
+    service.session.post.assert_not_called()
+
+
+def test_list_failure_explains_safe_reason_without_exposing_address(service):
+    service.get = Mock(side_effect=ca.AssessmentUnavailable('不支持的试卷地址'))
+    report = Mock()
+    assert service.run(COURSE, homework=True, report=report)['failed'] == 1
+    report.assert_called_once_with('课程作业列表读取失败：不支持的试卷地址', 'warning')
+
+
+@pytest.mark.parametrize('prefix', ['', '/mooc-ans'])
+def test_actual_homework_entry_script_link_and_submission_form(service, prefix):
+    entry = hidden(courseId=100, classId=200, cpi=300) + (
+        f'<script>location.href="{prefix}/work/phone/doHomeWork?courseId=100&classId=200&cpi=300&workId=9";</script>')
+    target = paper().replace('<form>', f'<form action="{prefix}/work/phone/doNormalHomeWorkSubmit">')
+    service.get = Mock(side_effect=[(entry, ca.HOST), (target, ca.HOST + prefix + '/work/phone/doHomeWork')])
+    result = service.open_paper({'url':ca.HOST+'/mooc-ans/android/mtaskmsgspecial', 'kind':'homework','id':'9'}, COURSE)
+    assert result['submit_url'] == ca.HOST + prefix + '/work/phone/doNormalHomeWorkSubmit'
+    assert len(result['questions']) == 1
+
+
+def test_calculation_homework_uses_prompt_instead_of_question_type_label():
+    html = paper(code='7').replace('<div class="tit">Question?</div>',
+        '<div class="fontLabel">计算题（10分）</div>'
+        '<div class="ans-cc workWrap fontLabel">八进制数转换为二进制：656</div>')
+    result = ca.parse_paper(html, WORK_URL, 'homework', COURSE)
+    q = result['questions'][0]
+    assert q['type'] == 'shortanswer' and q['code'] == '7'
+    assert q['title'] == '八进制数转换为二进制：656'
+    assert ca.answer_fields(q, '656₈ = 110101110₂', None, 'homework') == {'answer10':'656₈ = 110101110₂'}
+
+
+def test_homework_paging_uses_native_relation_fields_without_initial_integrity_reset(service):
+    from urllib.parse import parse_qs, urlsplit
+    initial_url=WORK_URL+'&workAnswerId=0&checkIntegrity=true&oldWorkId=99'
+    first=ca.parse_paper(paper(count=2), initial_url,'homework',COURSE)
+    service.get=Mock(return_value=(paper(qid='11',count=2),WORK_URL))
+    pages=service.paper_pages(first,'homework',COURSE)
+    assert len(pages)==2
+    params=parse_qs(urlsplit(service.get.call_args.args[0]).query)
+    assert params['workId']==['9'] and params['workAnswerId']==['90'] and params['index']==['1']
+    assert 'checkIntegrity' not in params and 'oldWorkId' not in params
+
+
 @pytest.mark.parametrize('status', ['已提交', '已完成', '待批阅', '待互评', '已结束', '未开始', '待重做'])
 def test_completed_unopened_and_retake_papers_are_never_entered(service, status):
     service.get = Mock(return_value=(list_page(status=status), ca.HOST))

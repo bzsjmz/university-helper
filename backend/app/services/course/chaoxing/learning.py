@@ -371,6 +371,8 @@ def _process_jobs_inline(
         )
         if result == StudyResult.CANCELLED:
             return ChapterResult.CANCELLED
+        if result == StudyResult.NOT_OPEN:
+            return ChapterResult.NOT_OPEN
         if result.is_failure():
             return ChapterResult.ERROR
     return None
@@ -962,6 +964,11 @@ def process_chapter(
                     for pending_future in pending:
                         pending_future.cancel()
                     return ChapterResult.CANCELLED
+                if result == StudyResult.NOT_OPEN:
+                    fast_shutdown = True
+                    for pending_future in pending:
+                        pending_future.cancel()
+                    return ChapterResult.NOT_OPEN
                 if result.is_failure():
                     fast_shutdown = True
                     for pending_future in pending:
@@ -976,6 +983,8 @@ def process_chapter(
     for result in job_results:
         if result == StudyResult.CANCELLED:
             return ChapterResult.CANCELLED
+        if result == StudyResult.NOT_OPEN:
+            return ChapterResult.NOT_OPEN
         if result.is_failure():
             return ChapterResult.ERROR
 

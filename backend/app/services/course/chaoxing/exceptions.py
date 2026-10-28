@@ -22,6 +22,10 @@ class FontDecodeError(ChaoxingException):
     """Raised when font decoding fails"""
 
 
+class PaperNotOpen(ChaoxingException):
+    """The platform explicitly says the chapter paper cannot be answered."""
+
+
 class AuthenticationError(ChaoxingException):
     """Raised when authentication fails"""
 

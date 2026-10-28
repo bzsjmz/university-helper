@@ -5,12 +5,14 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextvars import copy_context
 
 import requests
+from bs4 import BeautifulSoup
 from loguru import logger
 
 from .answer_check import cut
 from .answer_quality import is_usable_answer, has_unanswered_text
 from .decode import decode_questions_info
-from .exceptions import MaxRetryExceeded
+from .exceptions import MaxRetryExceeded, PaperNotOpen
+from .constants import StudyResult
 from . import query_control as control
 
 
@@ -101,6 +103,15 @@ def with_retry(max_retries=3, delay=1):
                 control.check_control()
                 try:
                     _resp = func(*args, **kwargs)
+
+                    soup = BeautifulSoup(_resp.text, 'lxml')
+                    for notice in soup.select('span.orangeColor'):
+                        if any(node.has_attr('hidden') or re.search(r'display\s*:\s*none', node.get('style', ''), re.I)
+                               for node in (notice, *notice.parents) if getattr(node, 'attrs', None) is not None):
+                            continue
+                        if any(marker in notice.get_text(' ', strip=True) for marker in
+                               ('已截止，不能作答', '已截止,不能作答', '尚未开始', '未到开始时间')):
+                            raise PaperNotOpen('章节测验尚未开放或已截止')
 
                     if "教师未创建完成该测验" in _resp.text:
                         raise PermissionError("教师未创建完成该测验")
@@ -326,6 +337,9 @@ class ChaoxingQuizService:
 
         try:
             final_resp, questions = fetch_response()
+        except PaperNotOpen:
+            logger.info('章节测验尚未开放或已截止，跳过答题')
+            return StudyResult.NOT_OPEN
         except Exception as e:
             logger.error(f"请求失败: {e}")
             return False

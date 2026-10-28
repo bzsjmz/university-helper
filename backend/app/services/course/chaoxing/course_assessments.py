@@ -20,16 +20,18 @@ HOSTS = {"mooc1-api.chaoxing.com", "mooc1.chaoxing.com", "mooc1-1.chaoxing.com",
          "mooc1-2.chaoxing.com", "mooc2-ans.chaoxing.com"}
 PATHS = {
     "/work/task-list", "/mooc-ans/exam/phone/task-list", "/android/mtaskmsgspecial",
-    "/exam-ans/android/mtaskmsgspecial", "/mooc-ans/work/phone/task-work",
+    "/exam-ans/android/mtaskmsgspecial", "/mooc-ans/android/mtaskmsgspecial",
+    "/exam-ans/exam/phone/task-list", "/mooc-ans/work/phone/task-work",
     "/exam-ans/exam/phone/task-exam", "/mooc-ans/work/phone/doHomeWork",
     "/exam-ans/exam/phone/start", "/exam-ans/exam/test/reVersionTestStartNew",
+    "/work/phone/doHomeWork", "/work/phone/doNormalHomeWorkSubmit",
     "/mooc-ans/work/phone/doNormalHomeWorkSubmit",
     "/exam-ans/exam/test/reVersionSubmitTestNew", "/mooc-ans/mooc2/work/task",
     "/mooc-ans/mooc2/work/dowork", "/mooc-ans/work/doHomeWorkNew",
     "/mooc-ans/work/addStudentWorkNew",
 }
 TYPES = {"0": "single", "1": "multiple", "2": "completion", "3": "judgement",
-         "4": "shortanswer", "6": "shortanswer"}
+         "4": "shortanswer", "6": "shortanswer", "7": "shortanswer"}
 
 
 class AssessmentUnavailable(Exception):
@@ -69,7 +71,7 @@ def assert_scope(values, course):
                 raise AssessmentUnavailable("试卷不属于当前所选课程或班级")
 
 
-def check_page(soup):
+def check_page(soup, *, listing=False):
     text = soup.get_text(" ", strip=True)
     for tokens, reason in [
         (("请输入验证码", "滑动验证", "人脸识别", "人脸验证", "考试口令", "监考", "客户端考试"), "需要人工验证或指定客户端"),
@@ -77,6 +79,9 @@ def check_page(soup):
         (("章节任务点未完成", "不能参加考试"), "未满足考试开放条件"),
         (("请先登录", "登录后"), "平台会话已失效"),
     ]:
+        # An unavailable row must not prevent processing other open papers.
+        if listing and reason in ("尚未开放或已截止", "未满足考试开放条件"):
+            continue
         if any(token in text for token in tokens):
             raise AssessmentUnavailable(reason)
     data = fields(soup)
@@ -87,7 +92,7 @@ def check_page(soup):
 
 def parse_list(html, base, kind, course):
     soup = BeautifulSoup(html, "lxml")
-    check_page(soup)
+    check_page(soup, listing=True)
     items, seen = [], set()
     rows = soup.select("ul.nav li[data], li[data]")
     for row in rows:
@@ -141,7 +146,8 @@ def parse_paper(html, url, kind, course, expected_count=None):
         code = str(type_node.get('value', '')) if type_node else str(timu.get('data', '')) if timu else ''
         if code not in TYPES:
             raise AssessmentUnavailable("试卷包含尚不支持的题型")
-        title = node.select_one('.Zy_TItle, .tit, .questionTitle, .fontLabel, .ans-cc.workWrap')
+        title = (node.select_one('.Zy_TItle, .tit, .questionTitle') or
+                 node.select_one('.ans-cc.workWrap') or node.select_one('.fontLabel'))
         if not title:
             raise AssessmentUnavailable("无法识别题干")
         options = []
@@ -180,7 +186,8 @@ def parse_paper(html, url, kind, course, expected_count=None):
             '/mooc-ans/work/phone/doNormalHomeWorkSubmit' if '/phone/' in url else '/mooc-ans/work/addStudentWorkNew')
         submit_url = safe_url(path, url)
     allowed = {'/exam-ans/exam/test/reVersionSubmitTestNew'} if kind == 'exam' else {
-        '/mooc-ans/work/phone/doNormalHomeWorkSubmit', '/mooc-ans/work/addStudentWorkNew'}
+        '/mooc-ans/work/phone/doNormalHomeWorkSubmit', '/work/phone/doNormalHomeWorkSubmit',
+        '/mooc-ans/work/addStudentWorkNew'}
     if urlsplit(submit_url).path not in allowed:
         raise AssessmentUnavailable("不支持的试卷提交方式")
     required = ('testPaperId', 'testUserRelationId') if kind == 'exam' else ('workRelationId', 'workRelationAnswerId')
@@ -355,7 +362,14 @@ class CourseAssessmentService:
             if kind == 'homework':
                 parsed = urlsplit(first['url'])
                 params = {key: values[0] for key, values in parse_qs(parsed.query).items()}
-                params['index'] = index
+                # The initial integrity check resets navigation to question 0.
+                # Follow the platform's next-question envelope, using the
+                # relation identifiers returned in the paper, not entry IDs.
+                for key in ('checkIntegrity', 'oldWorkId'):
+                    params.pop(key, None)
+                params.update(workId=data['workRelationId'], workAnswerId=data['workRelationAnswerId'],
+                              knowledgeid=data.get('knowledgeid', ''),
+                              enc=data.get('enc', params.get('enc', '')), mooc='1', source='0', index=index)
                 target = parsed._replace(query=urlencode(params)).geturl()
             else:
                 required = ('testPaperId', 'testUserRelationId', 'enc', 'encRemainTime', 'encLastUpdateTime')
@@ -431,6 +445,10 @@ class CourseAssessmentService:
                     items = self.list(course, kind)
             except control.QueryCancelled:
                 raise
+            except AssessmentUnavailable as exc:
+                summary['failed'] += 1
+                report(f'{label}列表读取失败：{exc}', 'warning')
+                continue
             except Exception:
                 summary['failed'] += 1
                 report(f'{label}列表读取失败，需人工核对', 'warning')

@@ -9,6 +9,7 @@ class StudyResult(Enum):
     ERROR = 2
     TIMEOUT = 3
     CANCELLED = 4
+    NOT_OPEN = 5
 
     def is_success(self):
         return self == StudyResult.SUCCESS

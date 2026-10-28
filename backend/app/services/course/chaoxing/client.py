@@ -118,6 +118,8 @@ class Chaoxing:
 
     def study_work(self, _course, _job, _job_info) -> StudyResult:
         result = self.quiz_service.study_work(_course, _job, _job_info)
+        if result == StudyResult.NOT_OPEN:
+            return result
         return StudyResult.SUCCESS if result else StudyResult.ERROR
 
     def _study_work_legacy(self, _course, _job, _job_info) -> StudyResult:

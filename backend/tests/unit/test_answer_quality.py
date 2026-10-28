@@ -13,6 +13,7 @@ from app.services.course.chaoxing.font_decoder import FontDecoder
 from app.services.course.chaoxing.quiz_service import QuizAnswerProcessor
 from app.services.course.chaoxing import quiz_service, work_legacy_service
 from app.services.course.chaoxing.work_legacy_service import ChaoxingWorkLegacyService
+from app.services.course.chaoxing.constants import StudyResult
 
 
 BAD = [
@@ -112,6 +113,42 @@ def test_partial_font_mapping_never_passes_garbled_characters(monkeypatch):
     assert cxsecret_font.decrypt({'uni4E00': 'known'}, '一？') == '如？'
     with pytest.raises(FontDecodeError):
         cxsecret_font.decrypt({'uni4E00': 'known', 'uni4E8C': 'missing'}, '一二？')
+
+
+def test_closed_chapter_paper_skips_before_font_decode_or_paid_query(monkeypatch):
+    decode = Mock(side_effect=AssertionError('Closed paper must not be decoded'))
+    monkeypatch.setattr(quiz_service, 'decode_questions_info', decode)
+    session = Mock()
+    session.get.return_value.text = '<form><span class="orangeColor">（已截止，不能作答）</span></form>'
+    tiku = Mock(DISABLE=False)
+    service = quiz_service.ChaoxingQuizService(tiku, 0, {}, Mock(get_session=lambda:session))
+    result = service.study_work({'courseId':'100','clazzId':'200'}, {'jobid':'work-9','enc':'fixture'},
+                               {'knowledgeid':'1','ktoken':'fixture','cpi':'300'})
+    assert result == StudyResult.NOT_OPEN
+    assert session.get.call_count == 1
+    decode.assert_not_called()
+    tiku.query.assert_not_called()
+    session.post.assert_not_called()
+
+
+def test_hidden_closed_notice_does_not_block_open_paper():
+    response = Mock(status_code=200, text='<form><div style="display: none"><span class="orangeColor">已截止，不能作答</span></div></form>')
+    with pytest.MonkeyPatch.context() as patch_decode:
+        patch_decode.setattr(quiz_service, 'decode_questions_info', lambda _: {'questions':[{'id':'1'}]})
+        fetch = quiz_service.with_retry()(lambda:response)
+        assert fetch()[0] is response
+
+
+def test_unavailable_job_does_not_report_chapter_completed(monkeypatch):
+    from app.services.course.chaoxing import learning
+    monkeypatch.setattr(learning,'process_job',lambda *args,**kwargs: StudyResult.NOT_OPEN)
+    client=Mock()
+    client.get_job_list.return_value=([{'type':'workid'}],{'knowledgeid':'1'})
+    callback=Mock()
+    result=learning.process_chapter(client,{}, {'title':'closed','has_finished':False,'need_unlock':False},1.5,
+                                   {'chapter_done_callback':callback})
+    assert result == learning.ChapterResult.NOT_OPEN
+    callback.assert_not_called()
 
 
 @pytest.mark.parametrize('quote', ["'", '"'])
