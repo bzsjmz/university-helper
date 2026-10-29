@@ -166,6 +166,7 @@ jobs:
     needs: [validate, build]
     runs-on: ubuntu-latest
     permissions:
+      actions: read
       contents: write
     env:
       VERSION: ${{ needs.validate.outputs.version }}
