@@ -46,7 +46,30 @@ def custom_selected(locator):
 
 
 def control_value(locator, kind):
+    if kind == 'welearn-match':
+        return locator.inner_text().strip()
     return locator.inner_text() if kind == 'contenteditable' else locator.input_value()
+
+
+def fill_matching(frame, locator, value):
+    """Use the courseware's focus/picker events; never assign Angular state."""
+    if control_value(locator, 'welearn-match') == value:
+        return True
+    locator.click()
+    picker = frame.locator('.optionsPicker:visible')
+    if picker.count() != 1:
+        return False
+    options = picker.locator('[option], [preoption]')
+    matches = options.evaluate_all(r'''(es, answer) => es.map((e,i) => {
+      const norm = s => (s || '').replace(/\s+/g,' ').trim();
+      const value = e.hasAttribute('preoption') ? norm(e.textContent).slice(0,1) :
+        norm(e.getAttribute('option') || e.textContent);
+      return value === norm(answer) ? i : -1;
+    }).filter(i => i >= 0)''', value)
+    if len(matches) != 1:
+        return False
+    options.nth(matches[0]).click()
+    return control_value(locator, 'welearn-match') == value
 
 
 def fill_question(frame, question, answer):
@@ -76,6 +99,10 @@ def fill_question(frame, question, answer):
         return False
     kinds = question.get('control_types', ['text'] * len(controls))
     for locator, value, control_kind in zip(controls, answer, kinds):
+        if control_kind == 'welearn-match':
+            if not fill_matching(frame, locator, value):
+                return False
+            continue
         locator.fill(value)
         if control_kind == 'contenteditable':
             locator.dispatch_event('input')
@@ -167,6 +194,7 @@ def answer_page(page, solve, *, submit=False, deadline=None, native=None, frames
                   saved=0, submitted=0, submission_unknown=0, native_answers=0, cache_hits=0, ai_answers=0)
     frames = list(page.frames) if frames is None else list(frames)
     forms = []
+    recordings = 0
     for frame in frames:
         if not frame_visible(frame):
             continue
@@ -174,22 +202,27 @@ def answer_page(page, solve, *, submit=False, deadline=None, native=None, frames
         if snapshot.get('blocked'):
             return {'status': 'needs_manual', 'message': '页面要求人工验证或尚未开放，未填写或提交', 'counts': counts}
         counts['unsupported'] += snapshot['unsupported']
+        recordings += snapshot.get('recordings', 0)
         if snapshot['questions']:
             forms.append((frame, snapshot))
             counts['questions'] += len(snapshot['questions'])
     if not counts['questions']:
         if allow_tabs and not counts['unsupported'] and advance_tab(page, frames, deadline):
             return {'status': 'advanced', 'message': '已访问课节内阅读页，继续下一题页', 'counts': {**counts, 'visited': 1, 'pages_advanced': 1}}
-        if allow_reading and any(frame.locator('et-talk, et-recorder').count() for frame in frames):
+        if allow_reading and any(frame.locator('et-talk:visible, et-recorder:visible').count() for frame in frames):
             return {'status': 'needs_manual', 'message': '本节是口语录音任务，需在平台录制本人语音后提交', 'counts': counts}
         if allow_reading and not counts['unsupported'] and any(frame.evaluate(r'''() => {
+          const visible = e => !!e.getClientRects().length &&
+            !['hidden','collapse'].includes(getComputedStyle(e).visibility) &&
+            !e.closest('[hidden],[aria-hidden="true"]');
           const item = document.querySelector('et-item[notscored]');
           return !!item && (item.innerText || '').trim().length >= 30 &&
-            !item.querySelector('et-blank,et-choice,et-select,et-tof,et-matching,et-sort,et-recorder,et-talk,input,textarea,select,[contenteditable],[data-controltype="filling"],[data-controltype="choice"]');
+            ![...item.querySelectorAll('et-blank,et-choice,et-select,et-tof,et-matching,et-sort,et-recorder,et-talk,input,textarea,select,[contenteditable],[data-controltype="filling"],[data-controltype="choice"]')].some(visible);
         }''') for frame in frames):
             return {'status': 'visited', 'message': '已访问无需填写的课件，正在核对平台进度',
                     'counts': {**counts, 'visited': 1}}
-        return {'status': 'needs_manual', 'message': '未识别到支持的题目，未提交', 'counts': counts}
+        message = '本页存在尚未适配的题目控件，未提交' if counts['unsupported'] else '未识别到支持的题目，未提交'
+        return {'status': 'needs_manual', 'message': message, 'counts': counts}
     if counts['unsupported']:
         return {'status': 'needs_manual', 'message': '存在不支持的控件，未调用 AI、填写或提交', 'counts': counts}
     plans = []
@@ -235,6 +268,10 @@ def answer_page(page, solve, *, submit=False, deadline=None, native=None, frames
     for frame, snapshot, answers in plans:
         if not frame_visible(frame) or read_form(frame) != snapshot or not all(verify_question(frame, q, a) for q, a in zip(snapshot['questions'], answers)):
             return {'status': 'needs_manual', 'message': '填写后页面或答案变化，未提交', 'counts': counts}
+    if allow_reading and recordings:
+        return {'status': 'needs_manual',
+                'message': f'文字题已填写复核，本页还有 {recordings} 项本人录音需在 WE Learn App 完成；未自动提交，文字保存状态未确认',
+                'counts': counts}
     names = ('提交', '提交作业', '提交答案', 'Submit') if submit else ('保存', '暂存', '保存答案', '保存作业', 'Save', 'Save answers')
     candidates = [(frame, button(frame, names)) for frame in frames if frame_visible(frame)]
     candidates = [(frame, candidate) for frame, candidate in candidates if candidate is not None]

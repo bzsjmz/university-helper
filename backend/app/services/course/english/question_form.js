@@ -3,7 +3,7 @@
   const text = e => {
     if (!e) return '';
     const copy = e.cloneNode(true);
-    copy.querySelectorAll('[data-itemtype="result"], et-blank .key, et-blank .blank, et-blank textarea, script, style, [hidden], [aria-hidden="true"]').forEach(n => n.remove());
+    copy.querySelectorAll('[data-itemtype="result"], et-blank .key, et-blank .blank, et-blank textarea, et-tof .controls, script, style, [hidden], [aria-hidden="true"]').forEach(n => n.remove());
     return (copy.textContent || '').replace(/\s+/g, ' ').trim();
   };
   const body = text(document.body);
@@ -11,8 +11,9 @@
     return { questions: [], unsupported: 1, blocked: true };
   const context = Array.from(document.querySelectorAll('.passage, .reading-passage, .article-content, .instruction, .transcript, et-script'))
     .filter(e => visible(e) || e.matches('et-script')).map(text).join('\n').slice(0,10000);
-  const controlType = e => e.matches('et-blank .blank[contenteditable]:not([contenteditable="false"])') ? 'contenteditable' : e.type;
-  const all = Array.from(document.querySelectorAll('input, textarea, select, et-blank .blank[contenteditable]:not([contenteditable="false"])')).filter(e => visible(e) && !e.closest('nav, header, [role=search], et-toggle'));
+  const matching = e => e.matches('et-blank span.blank[tabindex]:not([contenteditable])') && !!e.closest('[noinput]');
+  const controlType = e => matching(e) ? 'welearn-match' : e.matches('et-blank .blank[contenteditable]:not([contenteditable="false"])') ? 'contenteditable' : e.type;
+  const all = Array.from(document.querySelectorAll('input, textarea, select, et-blank .blank[contenteditable]:not([contenteditable="false"]), et-blank span.blank[tabindex]:not([contenteditable])')).filter(e => visible(e) && !e.closest('nav, header, [role=search], et-toggle'));
   const editable = all.filter(e => !['hidden','button','submit','reset'].includes(controlType(e)) && !e.disabled && !e.readOnly);
   document.querySelectorAll('[data-uh-control]').forEach(e => e.removeAttribute('data-uh-control'));
   editable.forEach((e,i) => e.setAttribute('data-uh-control', String(i)));
@@ -20,7 +21,7 @@
   document.querySelectorAll('[data-uh-question-root]').forEach(e => e.removeAttribute('data-uh-question-root'));
   for (const e of editable) {
     const root = e.closest('et-choice, et-tof, et-blank, .question, .question-item, [data-question-id], [class*="questionDefault"], [data-controltype="filling"], [data-controltype="fillinglong"], [data-controltype="choice"]');
-    if (!root || !['radio','checkbox','text','search','textarea','select-one','contenteditable'].includes(controlType(e))) {
+    if (!root || !['radio','checkbox','text','search','textarea','select-one','contenteditable','welearn-match'].includes(controlType(e))) {
       unsupported++; continue;
     }
     if (!roots.has(root)) roots.set(root, []);
@@ -30,7 +31,9 @@
   // A custom courseware widget with no supported native controls must not be
   // silently ignored when another question on the same page is recognized.
   unsupported += [...document.querySelectorAll('et-choice, et-tof, et-blank, et-matching, et-sort, [data-controltype="filling"], [data-controltype="fillinglong"]')]
-    .filter(e => visible(e) && !(e.matches('et-choice') && e.querySelector('ol > li')) && !e.querySelector('input:not([type="hidden"]):not([type="button"]):not([type="submit"]), textarea, select, .blank[contenteditable]:not([contenteditable="false"])')).length;
+    .filter(e => visible(e) && !(e.matches('et-choice') && e.querySelector('ol > li')) &&
+      !(e.matches('et-tof') && e.querySelectorAll(':scope > .wrapper > .controls > span').length === 2) &&
+      ![...e.querySelectorAll('input:not([type="hidden"]):not([type="button"]):not([type="submit"]), textarea, select, .blank[contenteditable]:not([contenteditable="false"]), span.blank[tabindex]')].some(c => visible(c) && (c.hasAttribute('contenteditable') || matching(c) || /^(INPUT|TEXTAREA|SELECT)$/.test(c.tagName)))).length;
   const questions = [];
   for (const [root, controls] of roots) {
     const courseware = root.matches('et-blank, [data-controltype="filling"], [data-controltype="fillinglong"]');
@@ -64,7 +67,7 @@
       if (options.length < 2 || options.length > 26 || new Set(options).size !== options.length) {
         unsupported++; continue;
       }
-    } else if (Array.from(types).every(t => ['text','search','textarea','contenteditable'].includes(t))) {
+    } else if (Array.from(types).every(t => ['text','search','textarea','contenteditable','welearn-match'].includes(t))) {
       type = types.has('textarea') ? 'shortanswer' : 'completion';
     } else { unsupported += controls.length; continue; }
     root.setAttribute('data-uh-question-root', String(questions.length));
@@ -90,6 +93,36 @@
     questions.push({type:'single', title, context, options, count:1, controls:ids,
       control_types:rows.map(() => 'welearn-option'), values:[]});
   }
+  // ET true/false widgets expose two native clickable spans, not radio inputs.
+  for (const root of document.querySelectorAll('et-tof')) {
+    if (!visible(root) || roots.has(root)) continue;
+    const rows = [...root.querySelectorAll(':scope > .wrapper > .controls > span')].filter(visible);
+    const options = rows.map(text);
+    const nativeValues = rows.map(e => e.getAttribute('ng-click')?.match(/^tof\.chose\(['"]([tf])['"]\)$/)?.[1]);
+    const title = text(root.querySelector(':scope > .wrapper > [ng-transclude]')) || text(root);
+    if (rows.length !== 2 || !title || options.some(s => !s) || new Set(options).size !== 2 ||
+        nativeValues.some(v => !v) || new Set(nativeValues).size !== 2) {
+      unsupported++; continue;
+    }
+    const ids = rows.map((e,i) => {
+      const id = String(editable.length + questions.length * 30 + i);
+      e.setAttribute('data-uh-control', id); return id;
+    });
+    root.setAttribute('data-uh-question-root', String(questions.length));
+    questions.push({type:'single', title, context, options, count:1, controls:ids,
+      control_types:rows.map(() => 'welearn-option'), values:[], native_values:nativeValues});
+  }
   if (questions.length > 100) return { questions: [], unsupported: editable.length, blocked: true };
-  return { questions, unsupported, blocked: false };
+  const recordings = [...document.querySelectorAll('et-recorder,et-talk')].filter(e => {
+    if (!visible(e) || e.parentElement?.closest('et-talk,et-recorder') || e.closest('[noprogress]')) return false;
+    // Existing recordings restored by the platform need no new recording. This
+    // is a read-only check; the native submit still validates the whole lesson.
+    if (e.matches('et-recorder')) try {
+      const recorder = window.angular?.element(e).controller('etRecorder');
+      if (Number.isFinite(recorder?.recordingCount) && recorder.recordingCount > 0 &&
+          recorder.isRecording === false && recorder.reset === false) return false;
+    } catch (_) {}
+    return true;
+  }).length;
+  return { questions, unsupported, blocked: false, recordings };
 }

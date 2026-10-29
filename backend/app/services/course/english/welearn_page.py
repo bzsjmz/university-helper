@@ -4,6 +4,8 @@ from urllib.parse import urlsplit
 
 from .forms import frame_visible
 
+MINIMUM_CONTENT_SECONDS = 5.0
+
 
 def wait_content(page, deadline):
     end = min(deadline, time.monotonic() + 25)
@@ -19,14 +21,25 @@ def wait_content(page, deadline):
                 loaded = frame.evaluate("""() => document.readyState !== 'loading' &&
                 !!document.querySelector('et-item,et-blank,et-choice,et-select,et-tof,[data-controltype="pagecontrol"],[data-controltype="filling"],[data-controltype="choice"],.question') &&
                 (document.body?.innerText || '').trim().length > 20 &&
-                [...document.querySelectorAll('et-blank')].filter(e=>e.getClientRects().length).every(e=>e.querySelector('.blank[contenteditable],textarea'))""")
+                [...document.querySelectorAll('et-blank')].filter(e=>e.getClientRects().length &&
+                  getComputedStyle(e).visibility !== 'hidden').every(e=>
+                  e.querySelector('.blank[contenteditable],textarea') ||
+                  (e.closest('[noinput]') && e.querySelector('.blank[tabindex]')))""")
             except Exception:
                 continue
             if loaded:
                 ready.append(frame)
         if ready:
-            # Angular directives and their answer keys settle after template load.
-            page.wait_for_timeout(500)
+            # Native reading pages commit after three seconds. Keep every loaded
+            # lesson/tab open for at least five, including unsupported content.
+            # Small waits keep browser events running; the parent can still stop
+            # this disposable worker and the existing lesson budget still applies.
+            settled = time.monotonic() + MINIMUM_CONTENT_SECONDS
+            while time.monotonic() < settled:
+                remaining = min(settled, deadline) - time.monotonic()
+                if remaining <= 0:
+                    return []
+                page.wait_for_timeout(min(200, remaining * 1000))
             return ready
         page.wait_for_timeout(250)
     return []

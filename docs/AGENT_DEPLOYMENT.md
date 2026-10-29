@@ -234,6 +234,9 @@ uh config --images
 当前已提交的英语实现需要 Playwright 和 Chromium，依赖固定在
 `backend/requirements-english.txt`。仓库提供的可选镜像可这样构建：
 
+课件五秒停留、ET 控件适配及 App 录音边界见
+[WE Learn 修复与录音调查](welearn-et-controls.md)。
+
 ```bash
 docker build -f repo/Dockerfile.english \
   -t university-helper-fork-app:initial-browser repo

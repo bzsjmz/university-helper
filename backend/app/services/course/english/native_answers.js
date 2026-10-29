@@ -41,6 +41,33 @@ q => {
     } else if (answer.length !== q.count || answer.some(s => !s)) return;
     candidates.push(answer);
   };
+  // ET removes its key attributes after Angular compilation. Read only the
+  // authored key on this exact widget's controller, never learner value/state.
+  let et;
+  try {
+    const name = root.matches('et-blank') ? 'etBlank' : root.matches('et-choice') ? 'etChoice' : root.matches('et-tof') ? 'etTof' : null;
+    if (name && window.angular) et = angular.element(root).controller(name);
+  } catch (_) {}
+  if (et?.hasKey === true && Array.isArray(et.key)) {
+    if (root.matches('et-blank') && q.count === 1 && controls.length === 1 &&
+        !['single','multiple'].includes(q.type)) {
+      // The platform splits authored alternatives into key[]. Punctuation in
+      // one such bound answer is valid; keep generic data-solution strict.
+      const key = et.key[0];
+      if (typeof key === 'string' && key.length <= 10000 && norm(key) &&
+          !/[<>]/.test(key) && !/^(?:\(?open\.?\)?|\(?answers? (?:may|will) vary\.?\)?|无标准答案|略)$/i.test(norm(key))) add([norm(key)]);
+    } else if (root.matches('et-choice') && ['single','multiple'].includes(q.type) &&
+               et.optionLength === q.options.length && et.multiple === (q.type === 'multiple') &&
+               controls.length === q.options.length) {
+      if (et.key.every(i => Number.isInteger(i) && i >= 0 && i < controls.length)) add(et.key);
+    } else if (root.matches('et-tof') && q.type === 'single' && controls.length === 2 &&
+               Array.isArray(q.native_values) && q.native_values.length === 2 &&
+               et.key.length === 1 && ['t','f'].includes(et.key[0]) &&
+               q.native_values.every((v,i) => ['t','f'].includes(v) && norm(et.labels?.[v]) === norm(q.options[i]))) {
+      const matches = q.native_values.map((v,i) => v === et.key[0] ? i : -1).filter(i => i >= 0);
+      if (matches.length === 1) add(matches);
+    }
+  }
   const matchOption = token => {
     const matches = q.options.map((text,i) => norm(text) === token || optionKeys[i]?.includes(token) ? i : -1).filter(i => i >= 0);
     return matches.length === 1 ? matches[0] : null;
