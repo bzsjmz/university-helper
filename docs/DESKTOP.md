@@ -75,6 +75,7 @@ AppImage 不能保证在所有发行版运行。Linux 不使用 root 账号启�
 
 使用 `.github/workflows/desktop.yml`，手动指定版本或推送 `desktop-vX.Y.Z-beta.N` 标签。
 工作流先验证共享工作台、SQLite、多账号、设置和 worker，再分别在四种原生 runner 上构建。
+版本接受 `X.Y.Z` 或 `X.Y.Z-beta.N`；MSI 单独使用四段数字版本，预览 N 为 1–65534，正式版用 65535，应用内仍保留原 SemVer。
 Windows 还执行真实管道轮询验证。PyInstaller 包含英语 JS 资源，浏览器独立随安装器分发，项目及英语适配的许可说明随应用放入 `licenses/`。
 打包冒烟检查仅使用临时数据、模拟账号和本地 HTML，不访问真实课程或调用付费 AI。
 最终产出四个平台的安装包、校验值和 **GitHub Release 草稿**；不会自动公开发布。
