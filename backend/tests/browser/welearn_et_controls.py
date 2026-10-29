@@ -34,6 +34,58 @@ def fixture(html):
 
 
 class WelearnControlsTest(unittest.TestCase):
+    def test_recording_details_read_compiled_script_without_mutating_state(self):
+        with fixture('''<et-item><p>Speaking exercises with separate recording requirements.</p>
+          <et-recorder id="open">Answer the question</et-recorder>
+          <et-recorder id="read">Read the passage</et-recorder></et-item>'''
+                     + ANGULAR + '''<script>
+          document.querySelector('#open').nativeKey={recordingCount:0,isRecording:false,reset:false,isMobile:false};
+          document.querySelector('#read').nativeKey={recordingCount:0,isRecording:false,reset:false,isMobile:false,scriptFlag:true,script:'Read this sentence exactly.'};
+          </script>''') as page:
+            snapshot = read_form(page.main_frame)
+            self.assertEqual(snapshot['recordings'], 2)
+            self.assertEqual(snapshot['recording_details'][0], {
+                'id': 'open', 'kind': 'recording', 'scored': False, 'script': '', 'app_required': True})
+            self.assertEqual(snapshot['recording_details'][1]['script'], 'Read this sentence exactly.')
+            self.assertTrue(snapshot['recording_details'][1]['scored'])
+            self.assertEqual(page.evaluate("document.querySelector('#read').nativeKey.recordingCount"), 0)
+
+    def test_pending_recording_is_not_skipped_by_the_tab_pager(self):
+        with fixture('''<et-item><p>A speaking task that requires a recording before leaving.</p>
+          <et-recorder id="voice">Record your answer</et-recorder>
+          <et-button class="nextTab-btn" action="item.switchTab(0)"><button onclick="window.advanced=true">Next</button></et-button>
+          </et-item>''') as page:
+            result = answer_page(page, lambda q: self.fail('Recording cannot request text AI'),
+                                 allow_reading=True, allow_tabs=True)
+            self.assertEqual(result['status'], 'needs_manual')
+            self.assertIn('普通录音 1 项', result['message'])
+            self.assertIsNone(page.evaluate('window.advanced'))
+
+    def test_restored_recording_only_page_can_use_native_submit(self):
+        with fixture('''<et-item><p>A speaking exercise with a recording restored by the platform.</p>
+          <et-recorder id="voice">Existing recording</et-recorder>
+          <button onclick="this.parentElement.setAttribute('data-submitted','true');window.submitted=true">Submit</button>
+          </et-item>''' + ANGULAR + '''<script>
+          document.querySelector('#voice').nativeKey={recordingCount:1,isRecording:false,reset:false};
+          </script>''') as page:
+            result = answer_page(page, lambda q: self.fail('Existing voice needs no AI'),
+                                 submit=True, allow_reading=True)
+            self.assertEqual(result['counts']['submitted'], 1)
+            self.assertEqual(result['status'], 'finished')
+            self.assertTrue(page.evaluate('window.submitted'))
+
+    def test_reset_recording_remains_pending(self):
+        with fixture('''<et-item><p>A reset recording must not be reused or submitted.</p>
+          <et-recorder id="voice">Reset recording</et-recorder>
+          <button onclick="window.submitted=true">Submit</button></et-item>'''
+                     + ANGULAR + '''<script>
+          document.querySelector('#voice').nativeKey={recordingCount:1,isRecording:false,reset:true};
+          </script>''') as page:
+            result = answer_page(page, native_only, submit=True, allow_reading=True)
+            self.assertEqual(result['counts']['recordings_required'], 1)
+            self.assertEqual(result['status'], 'needs_manual')
+            self.assertIsNone(page.evaluate('window.submitted'))
+
     def test_reading_with_hidden_player_controls_waits_for_native_commit(self):
         with fixture('''<et-item notscored><p>A reading page with enough text and a native delayed save.</p>
           <select hidden><option>audio speed</option></select></et-item>
@@ -135,7 +187,8 @@ class WelearnControlsTest(unittest.TestCase):
             self.assertEqual(result['counts']['filled'], 1)
             self.assertEqual(result['counts']['submitted'], 0)
             self.assertEqual(result['counts']['submission_rejected'] if 'submission_rejected' in result['counts'] else 0, 0)
-            self.assertIn('2 项本人录音', result['message'])
+            self.assertIn('2 项录音', result['message'])
+            self.assertIn('普通录音 2 项', result['message'])
             self.assertIsNone(page.evaluate('window.submitted'))
 
     def test_restored_recording_does_not_block_supported_text_submission(self):

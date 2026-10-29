@@ -292,7 +292,7 @@ def welearn_answer(credential, cid, item, seconds, solve, submit=False):
             fully_filled = (result['counts'].get('questions', 0) > 0
                             and result['counts'].get('filled') == result['counts']['questions']
                             and not result['counts'].get('unsupported') and not result['counts'].get('missing'))
-            if result['status'] == 'visited' or fully_filled:
+            if result['status'] == 'visited' or fully_filled or result['counts'].get('submitted'):
                 # Use the real courseware exit to let its SCORM runtime save.
                 # Never write fabricated completion/score fields.
                 return_to_catalog(page)
@@ -313,6 +313,8 @@ def welearn_answer(credential, cid, item, seconds, solve, submit=False):
                     result.update(status='finished', message='平台已确认课节完成')
                 elif result['status'] == 'visited':
                     result.update(status='needs_manual', message='已访问无需填写的课件；平台尚未确认完成，未伪报完成')
+                elif not result['counts'].get('questions') and result['counts'].get('submitted'):
+                    result.update(status='needs_manual', message='录音页已收到提交回执，但平台尚未确认课节完成；请在官网核对，勿直接重复提交')
             return result
     finally:
         client.session.close()

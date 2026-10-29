@@ -99,7 +99,8 @@ class NativeBrowserTest(unittest.TestCase):
                 page.set_content('<et-item notscored>Repeat these sentences and record your own voice.<et-recorder><button>Record</button></et-recorder></et-item>')
                 result = answer_page(page, lambda q: self.fail('No text question'), allow_reading=True)
                 self.assertEqual(result['status'], 'needs_manual')
-                self.assertIn('录制本人语音', result['message'])
+                self.assertIn('普通录音 1 项', result['message'])
+                self.assertIn('上传尚未接通', result['message'])
                 self.assertNotIn('visited', result['counts'])
             finally:
                 browser.close()

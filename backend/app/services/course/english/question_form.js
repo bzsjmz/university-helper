@@ -113,7 +113,7 @@
       control_types:rows.map(() => 'welearn-option'), values:[], native_values:nativeValues});
   }
   if (questions.length > 100) return { questions: [], unsupported: editable.length, blocked: true };
-  const recordings = [...document.querySelectorAll('et-recorder,et-talk')].filter(e => {
+  const pendingRecordings = [...document.querySelectorAll('et-recorder,et-talk')].filter(e => {
     if (!visible(e) || e.parentElement?.closest('et-talk,et-recorder') || e.closest('[noprogress]')) return false;
     // Existing recordings restored by the platform need no new recording. This
     // is a read-only check; the native submit still validates the whole lesson.
@@ -123,6 +123,14 @@
           recorder.isRecording === false && recorder.reset === false) return false;
     } catch (_) {}
     return true;
-  }).length;
-  return { questions, unsupported, blocked: false, recordings };
+  });
+  const recording_details = pendingRecordings.map(e => {
+    let recorder;
+    try { recorder = window.angular?.element(e).controller('etRecorder'); } catch (_) {}
+    const script = typeof recorder?.script === 'string' ? recorder.script : (e.getAttribute('script') || '');
+    return {id: e.id || '', kind: e.matches('et-recorder') ? 'recording' : 'conversation',
+      scored: !!script.trim() || recorder?.scriptFlag === true,
+      script: script.slice(0,10000), app_required: recorder?.isMobile === false};
+  });
+  return { questions, unsupported, blocked: false, recordings: pendingRecordings.length, recording_details };
 }

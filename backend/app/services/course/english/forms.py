@@ -195,6 +195,9 @@ def answer_page(page, solve, *, submit=False, deadline=None, native=None, frames
     frames = list(page.frames) if frames is None else list(frames)
     forms = []
     recordings = 0
+    recording_details = []
+    recording_state_known = True
+    snapshots = []
     for frame in frames:
         if not frame_visible(frame):
             continue
@@ -202,15 +205,24 @@ def answer_page(page, solve, *, submit=False, deadline=None, native=None, frames
         if snapshot.get('blocked'):
             return {'status': 'needs_manual', 'message': '页面要求人工验证或尚未开放，未填写或提交', 'counts': counts}
         counts['unsupported'] += snapshot['unsupported']
+        recording_state_known &= type(snapshot.get('recordings')) is int
         recordings += snapshot.get('recordings', 0)
+        recording_details.extend(snapshot.get('recording_details', []))
+        snapshots.append((frame, snapshot))
         if snapshot['questions']:
             forms.append((frame, snapshot))
             counts['questions'] += len(snapshot['questions'])
-    if not counts['questions']:
-        if allow_tabs and not counts['unsupported'] and advance_tab(page, frames, deadline):
+    recording_only_ready = (allow_reading and recording_state_known and not counts['questions'] and not counts['unsupported']
+                            and not recordings and any(
+                                frame.locator('et-recorder:visible, et-talk:visible').count() for frame, _ in snapshots))
+    if not counts['questions'] and not recording_only_ready:
+        if allow_tabs and not counts['unsupported'] and not recordings and advance_tab(page, frames, deadline):
             return {'status': 'advanced', 'message': '已访问课节内阅读页，继续下一题页', 'counts': {**counts, 'visited': 1, 'pages_advanced': 1}}
         if allow_reading and any(frame.locator('et-talk:visible, et-recorder:visible').count() for frame in frames):
-            return {'status': 'needs_manual', 'message': '本节是口语录音任务，需在平台录制本人语音后提交', 'counts': counts}
+            from .welearn_recordings import recording_message
+            required = recordings or sum(frame.locator('et-talk:visible, et-recorder:visible').count() for frame in frames)
+            return {'status': 'needs_manual', 'message': recording_message(recording_details, required),
+                    'counts': {**counts, 'recordings_required': required}}
         if allow_reading and not counts['unsupported'] and any(frame.evaluate(r'''() => {
           const visible = e => !!e.getClientRects().length &&
             !['hidden','collapse'].includes(getComputedStyle(e).visibility) &&
@@ -269,9 +281,13 @@ def answer_page(page, solve, *, submit=False, deadline=None, native=None, frames
         if not frame_visible(frame) or read_form(frame) != snapshot or not all(verify_question(frame, q, a) for q, a in zip(snapshot['questions'], answers)):
             return {'status': 'needs_manual', 'message': '填写后页面或答案变化，未提交', 'counts': counts}
     if allow_reading and recordings:
+        from .welearn_recordings import recording_message
         return {'status': 'needs_manual',
-                'message': f'文字题已填写复核，本页还有 {recordings} 项本人录音需在 WE Learn App 完成；未自动提交，文字保存状态未确认',
-                'counts': counts}
+                'message': recording_message(recording_details, recordings, mixed=True),
+                'counts': {**counts, 'recordings_required': recordings}}
+    if recording_only_ready and any(not frame_visible(frame) or read_form(frame) != snapshot
+                                    for frame, snapshot in snapshots):
+        return {'status': 'needs_manual', 'message': '录音页面状态变化，未保存或提交', 'counts': counts}
     names = ('提交', '提交作业', '提交答案', 'Submit') if submit else ('保存', '暂存', '保存答案', '保存作业', 'Save', 'Save answers')
     candidates = [(frame, button(frame, names)) for frame in frames if frame_visible(frame)]
     candidates = [(frame, candidate) for frame, candidate in candidates if candidate is not None]

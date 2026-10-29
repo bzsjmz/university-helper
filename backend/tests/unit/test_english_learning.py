@@ -390,6 +390,31 @@ def test_welearn_internal_tabs_aggregate_answers_before_progress_confirmation(mo
     client.sco.assert_not_called()
 
 
+@pytest.mark.parametrize('completed', [True, False])
+def test_welearn_restored_recording_only_submission_requires_catalog_confirmation(monkeypatch, completed):
+    from contextlib import nullcontext
+    from app.services.course.english import forms, welearn_page
+    client = Mock()
+    client.items.return_value = ({'cid': 'c'}, [{'id': 'leaf', 'progress': 'false'}])
+    client.item_complete.return_value = completed
+    monkeypatch.setattr(clients, 'Welearn', Mock(return_value=client, BASE='https://welearn.sflep.com'))
+    context, page, frame = Mock(), Mock(), Mock()
+    context.cookies.return_value = []
+    monkeypatch.setattr(clients, 'unipus_browser', lambda *a, **kw: nullcontext((context, page)))
+    monkeypatch.setattr(welearn_page, 'wait_content', lambda *a: [frame])
+    exit_page = Mock()
+    monkeypatch.setattr(welearn_page, 'return_to_catalog', exit_page)
+    monkeypatch.setattr(forms, 'answer_page', lambda *a, **kw: {
+        'status': 'finished', 'message': '已收到平台提交回执', 'counts': {'questions': 0, 'submitted': 1}})
+    result = clients.welearn_answer('sid=private', 'c', 'leaf', 30, Mock(), submit=True)
+    exit_page.assert_called_once()
+    assert client.item_complete.called
+    assert result['status'] == ('finished' if completed else 'needs_manual')
+    assert result['counts'].get('platform_completed', 0) == int(completed)
+    assert result['counts']['submitted'] == 1
+    client.sco.assert_not_called()
+
+
 @pytest.mark.parametrize('token_fields', [{'tokenInfo': {'jwt':'private-fixture-token'}}, {'Authorization':'private-fixture-token'}])
 def test_uai5_login_accepts_portal_storage_without_any_cookie(token_fields):
     from app.services.course.english.login_browser import authenticated_result

@@ -236,6 +236,8 @@ uh config --images
 
 课件十秒停留、ET 控件适配及 App 录音边界见
 [WE Learn 修复与录音调查](welearn-et-controls.md)。
+火山豆包语音合成的独立 Secret、试听准备命令和未接通的 App 上传边界见
+[WE Learn 语音准备](welearn-speech.md)。正常任务不会自动调用该计费服务。
 
 ```bash
 docker build -f repo/Dockerfile.english \
