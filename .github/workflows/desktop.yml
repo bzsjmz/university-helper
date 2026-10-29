@@ -7,7 +7,7 @@ on:
     inputs:
       version:
         description: 'Desktop preview version (X.Y.Z or X.Y.Z-beta.N)'
-        default: '1.6.0-beta.2'
+        default: '1.6.0-beta.3'
         required: true
 
 permissions:
@@ -141,6 +141,15 @@ jobs:
         with:
           projectPath: frontend
           args: --target ${{ matrix.target }} --config '{"bundle":{"createUpdaterArtifacts":false}}'
+      - name: Smoke-test signed macOS bundle
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          RUST_TARGET: ${{ matrix.target }}
+        run: |
+          BUNDLE="$GITHUB_WORKSPACE/frontend/src-tauri/target/$RUST_TARGET/release/bundle/macos/学道.app"
+          export PLAYWRIGHT_BROWSERS_PATH="$BUNDLE/Contents/Resources/browsers"
+          python scripts/smoke_desktop.py "$BUNDLE/Contents/MacOS/uh-backend"
       - name: Save installers
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:

@@ -60,7 +60,9 @@ def main():
             result = json.loads(worker.stdout)
             assert result.get('ok') is False
             probe = subprocess.run([str(binary), '--desktop-probe'], capture_output=True,
-                env=environment, timeout=90, check=True)
+                env=environment, timeout=90, check=False)
+            if probe.returncode:
+                raise RuntimeError('Offline browser probe failed: ' + probe.stderr.decode('utf-8', errors='replace')[-6000:])
             assert b'UH_DESKTOP_PROBE_OK' in probe.stdout
             print('PASS: frozen UI, SQLite accounts, desktop settings, worker dispatch, browser and JS assets')
         finally:

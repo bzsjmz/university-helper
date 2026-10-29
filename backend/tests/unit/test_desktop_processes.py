@@ -43,14 +43,14 @@ def test_real_pipe_timeout_fragmentation_followup_and_eof():
             process.stdin.write(b'first\n')
             process.stdin.flush()
             assert poller.select(timeout=5)
-            assert os.read(process.stdout.fileno(), 65536) == b'one\n'
+            assert os.read(process.stdout.fileno(), 65536).replace(b'\r\n', b'\n') == b'one\n'
         # Login polling creates a fresh selector and must keep the unread reply.
         process.stdin.write(b'next\n')
         process.stdin.flush()
         with pipe_selector() as poller:
             poller.register(process.stdout, selectors.EVENT_READ)
             assert poller.select(timeout=5)
-            assert os.read(process.stdout.fileno(), 65536) == b'two\n'
+            assert os.read(process.stdout.fileno(), 65536).replace(b'\r\n', b'\n') == b'two\n'
             assert poller.select(timeout=5)
             assert os.read(process.stdout.fileno(), 65536) == b''
         process.wait(timeout=5)
