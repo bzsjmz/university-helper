@@ -53,27 +53,17 @@ WE Learn 优先课件答案和缓存；每道新 AI 题（含首题）调用前�
 
 ### 桌面端
 
-到 [最新 Release](../../releases/latest) 下载对应系统的安装包。桌面端（学道）自带后端，在你自己的电脑上运行，不需要 Docker、Postgres 或 Python。它是单用户的，不用注册账号，打开就能用。
+个人电脑优先使用本 fork 的 [桌面版使用说明](./docs/DESKTOP.md)。Windows 10/11 x64 优先，同时保留 macOS（Apple Silicon / Intel）和 Linux x64。
+安装包包含当前多账号工作台、后端、SQLite 与英语试用浏览器，无需安装 Docker、PostgreSQL 或 Python，也不用注册管理账号。
 
-| 系统 | 下载文件 | 说明 |
-|---|---|---|
-| Windows 10/11 | `xuedao_<ver>_windows_x64-setup.exe` / `xuedao_<ver>_windows_x64.msi` | 未签名：SmartScreen 中点 **更多信息 → 仍要运行** |
-| macOS Apple Silicon | `xuedao_<ver>_darwin_aarch64.dmg` | 未签名：首次启动右键 App → **打开** |
-| macOS Intel | `xuedao_<ver>_darwin_x64.dmg` | 同样右键 → **打开** |
-| Linux | `xuedao_<ver>_linux_amd64.AppImage` / `.deb` | `chmod +x *.AppImage && ./*.AppImage` |
+到 [本 fork 的 Releases](https://github.com/bzsjmz/university-helper/releases) 查找 `desktop-v…` 版本；草稿和失败构建不代表安装包已公开可用。
+Windows 推荐下载文件名以 `x86_64-pc-windows-msvc.exe` 结尾的安装器，其他平台文件名及校验方法见使用说明。
 
-桌面端启动几秒后会去 GitHub 检查新版本。有新版本时，它会先弹窗显示版本号和更新说明，问你要不要更新。点「现在更新」会下载新版本并重启学道，正在跑的任务会中断；点「稍后」则等下次启动再提醒。自动更新需要发版时配置了 Tauri 签名密钥。上游仓库没有密钥时发版流程会直接失败，所以只有 fork 出来的构建可能没有自动更新。
+安装后在“学习通泛雅”添加账号、读取课程并选择范围；任务控制、批量预览、作业/考试和历史重启与当前服务器工作台共用实现。
+“桌面设置”可填写自己的 AI 接口、模型和双 Key；默认 `LocalCache → AI`，不包含维护者的凭据或私有题库。AI 可能产生费用。
 
-macOS 版目前是免费的 ad-hoc 签名，没有经过公证。先试试 **右键 App → 打开**。如果系统提示「已损坏，无法打开」或「移到废纸篓」，把 App 拖到「应用程序」，再执行下面的命令去掉下载隔离标记：
-
-```bash
-xattr -dr com.apple.quarantine "/Applications/学道.app"
-open "/Applications/学道.app"
-```
-
-这条命令只用于从本仓库 GitHub Releases 下载的官方安装包。
-
-桌面端的日志文件是 `desktop.log`，位置：macOS 在 `~/Library/Logs/xyz.cornna.shuake/`，Windows 在 `%LOCALAPPDATA%\xyz.cornna.shuake\logs\`，Linux 在 `~/.local/share/xyz.cornna.shuake/logs/`。
+当前预览未配置本 fork 自动更新签名，需手动下载新包更新。请先停止任务再退出或升级，电脑休眠/进程重启后的执行线程不会自动恢复。
+Windows 安装包未做商业代码签名，macOS 未公证；安装来源、系统依赖、数据备份与日志路径均见 [详细说明](./docs/DESKTOP.md)。
 
 ### 上游 Release 安装（参考）
 

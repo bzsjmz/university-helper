@@ -67,44 +67,17 @@ Restarting creates new workers; it does not preserve execution threads across pr
 
 ### Desktop app
 
-Download the installer for your OS from the [latest release](../../releases/latest).
-The desktop app (学道) bundles the backend and runs on your own machine, so you
-don't need Docker, Postgres or Python. It is single-user: there is no account
-to register, you open it and start.
+Use the [fork desktop guide](./docs/DESKTOP.md) for personal computers. Windows 10/11 x64 comes first, with macOS (Apple Silicon / Intel) and Linux x64 builds retained.
+The app includes the current multi-account workbench, backend, SQLite and the English trial browser. No Docker, PostgreSQL, Python installation or management registration is required.
 
-| OS | Download | Notes |
-|---|---|---|
-| Windows 10/11 | `xuedao_<ver>_windows_x64-setup.exe` / `xuedao_<ver>_windows_x64.msi` | unsigned: SmartScreen → **More info → Run anyway** |
-| macOS (Apple Silicon) | `xuedao_<ver>_darwin_aarch64.dmg` | unsigned: right-click the app → **Open** on first launch |
-| macOS (Intel) | `xuedao_<ver>_darwin_x64.dmg` | same right-click → **Open** |
-| Linux | `xuedao_<ver>_linux_amd64.AppImage` / `.deb` | `chmod +x *.AppImage && ./*.AppImage` |
+Look for `desktop-v…` versions in [this fork’s Releases](https://github.com/bzsjmz/university-helper/releases). Drafts and failed builds do not establish installer availability.
+Windows users should prefer the installer ending in `x86_64-pc-windows-msvc.exe`; the guide lists every platform and checksum instructions.
 
-Every release has installers for all the platforms above. Signed updater
-artifacts and automatic updates are available only for releases where the
-repository's Tauri signing secret is configured; without it, installers still
-build but the release omits updater artifacts. The upstream repository refuses
-to publish a release without that secret, so this only affects forks.
+Add your learning accounts, read courses and confirm the selected scope before starting. The desktop shares the current task controls, batch preview, assessments, persistent history and restart implementation.
+Desktop Settings accepts your own AI endpoint, model and primary/fallback keys. The default remains `LocalCache → AI`; maintainer credentials and private question banks are never included. AI calls may incur charges.
 
-A few seconds after it starts, the app checks GitHub for a newer version. If
-there is one, it shows the version and release notes and asks first. "现在更新"
-downloads the update and restarts the app, which stops any running task.
-"稍后" skips it until the next launch.
-
-The installers are not code-signed by Apple or Microsoft yet, so the first
-launch shows a warning. On macOS, try right-click → **Open** first. If
-Gatekeeper says the app is damaged or should be moved to the Trash, drag it to
-`/Applications` and remove the download quarantine flag:
-
-```bash
-xattr -dr com.apple.quarantine "/Applications/学道.app"
-open "/Applications/学道.app"
-```
-
-Only run this for builds downloaded from this repository's GitHub Releases.
-
-The app writes a log file, `desktop.log`, to `~/Library/Logs/xyz.cornna.shuake/`
-on macOS, `%LOCALAPPDATA%\xyz.cornna.shuake\logs\` on Windows and
-`~/.local/share/xyz.cornna.shuake/logs/` on Linux.
+This preview has no fork updater signing key and uses manual installer updates. Stop tasks before quitting or updating; sleep and process restarts do not preserve execution threads.
+Windows installers have no commercial code signature and macOS builds are not notarized. See the guide for platform dependencies, local data, backups and log paths.
 
 ### Upstream release installation (reference)
 
