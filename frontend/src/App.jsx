@@ -15,6 +15,7 @@ import { isAuthenticated } from './utils/auth'
 
 const Login = lazy(() => import('./pages/Login'))
 const Register = lazy(() => import('./pages/Register'))
+const DesktopSettings = lazy(() => import('./pages/DesktopSettings'))
 const Dashboard = lazy(() => import('./pages/Dashboard'))
 const ChaoxingSignin = lazy(() => import('./pages/ChaoxingSignin'))
 const ChaoxingFanya = lazy(() => import('./pages/ChaoxingFanya'))
@@ -47,6 +48,7 @@ function RuntimeRoutes() {
             }
           >
             <Route path="/dashboard" element={<Dashboard />} />
+            {isLocal && <Route path="/desktop-settings" element={<DesktopSettings />} />}
             <Route path="/chaoxing-signin" element={<ChaoxingSignin />} />
             <Route path="/chaoxing-fanya" element={<ChaoxingFanya />} />
             <Route path="/zhihuishu-panel" element={<Zhihuishu />} />

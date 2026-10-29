@@ -2,6 +2,8 @@
 
 # University Helper
 
+**个人电脑桌面版：** Windows 优先，macOS / Linux 同步保留。当前工作台的桌面适配、安装步骤与发行状态见 [桌面版使用说明](./docs/DESKTOP.md)。无需 Docker、Python 或 PostgreSQL；安装包以本 fork 的 `desktop-v…` Release 为准。
+
 <p align="center">
   <strong>上游演示网站（非本 fork 实例）：</strong>
   <a href="https://shuake.cornna.xyz">shuake.cornna.xyz</a>

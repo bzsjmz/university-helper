@@ -17,6 +17,7 @@ from uuid import uuid4
 
 from app.core.credential_crypto import decrypt_str, encrypt_str
 from .clients import PlatformError, course_url, storage_state
+from .process_runtime import pipe_selector, process_options, windows_environment, worker_command
 
 
 class EnglishManager:
@@ -52,6 +53,12 @@ class EnglishManager:
     @staticmethod
     def kill(process):
         # A crashed worker may leave Chromium descendants in its process group.
+        if sys.platform == 'win32':
+            subprocess.run(['taskkill', '/PID', str(process.pid), '/T', '/F'],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                           creationflags=subprocess.CREATE_NO_WINDOW, timeout=10, check=False)
+            process.wait(timeout=10)
+            return
         try:
             os.killpg(process.pid, signal.SIGKILL)
         except ProcessLookupError:
@@ -75,12 +82,15 @@ class EnglishManager:
     def _spawn(temporary_dir=None):
         environment = {key: value for key, value in os.environ.items()
             if key in {'PATH', 'LANG', 'LC_ALL', 'TZ', 'TMPDIR', 'PLAYWRIGHT_BROWSERS_PATH', 'XDG_RUNTIME_DIR'}}
+        if sys.platform == 'win32':
+            environment.update(windows_environment())
+        if getattr(sys, 'frozen', False):
+            environment['PYINSTALLER_RESET_ENVIRONMENT'] = '1'
         if temporary_dir is not None:
             environment['TMPDIR'] = temporary_dir
-        return subprocess.Popen([sys.executable, '-B', '-m',
-            'app.services.course.english.worker'], cwd=Path(__file__).resolve().parents[4],
+        return subprocess.Popen(worker_command(), cwd=Path(__file__).resolve().parents[4],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-            start_new_session=True, env=environment)
+            **process_options(), env=environment)
 
     def _communicate(self, process, request, task):
         try:
@@ -109,7 +119,7 @@ class EnglishManager:
         deadline = time.monotonic() + request['seconds']
         solver = EnglishSolver(request['platform'], request['course'], request.get('allow_ai', False),
             lambda: (task is not None and task['cancel'].is_set()) or time.monotonic() >= deadline)
-        selector = selectors.DefaultSelector()
+        selector = pipe_selector()
         try:
             selector.register(process.stdout, selectors.EVENT_READ)
             process.stdin.write(json.dumps(request).encode() + b'\n')

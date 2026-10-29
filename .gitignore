@@ -85,3 +85,6 @@ frontend/coverage/
 /dist/
 /build/
 /uh-backend.spec
+
+# Downloaded desktop browser runtime (built in CI)
+/frontend/src-tauri/resources/browsers/

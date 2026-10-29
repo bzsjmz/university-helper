@@ -40,6 +40,8 @@ fi
   --name uh-backend \
   --paths backend \
   --collect-submodules app \
+  --collect-data app \
+  --collect-all playwright \
   --collect-submodules api \
   --collect-submodules Crypto \
   --collect-submodules fontTools \

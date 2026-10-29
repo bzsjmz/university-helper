@@ -243,3 +243,12 @@ def test_sidecar_image_names():
     assert desktop_entry._is_sidecar_image("C:\\Program Files\\学道\\uh-backend.exe")
     assert desktop_entry._is_sidecar_image("uh-backend")
     assert not desktop_entry._is_sidecar_image("uh-backend-helper")
+
+
+def test_only_one_instance_can_use_the_desktop_data(appdata):
+    with desktop_entry.instance_lock():
+        with pytest.raises(RuntimeError, match='已在运行'):
+            with desktop_entry.instance_lock():
+                pytest.fail('second desktop acquired the database')
+    with desktop_entry.instance_lock():
+        pass

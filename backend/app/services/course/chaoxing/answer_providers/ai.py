@@ -344,6 +344,15 @@ class AI(Tiku):
         return self._invoke_completion(messages)
 
     def _init_tiku(self):
+        if os.environ.get('PROFILE') == 'local':
+            # A settings save rotates endpoint and key files as one operation.
+            # Do not initialize a task with a new key and the previous endpoint.
+            from app.desktop_settings import LOCK
+            with LOCK:
+                return self._init_tiku_unlocked()
+        return self._init_tiku_unlocked()
+
+    def _init_tiku_unlocked(self):
         server_endpoint = os.environ.get("CHAOXING_AI_ENDPOINT", "").strip()
         endpoint = str(self._conf.get("endpoint") or server_endpoint).strip()
         model = str(self._conf.get("model") or os.environ.get("CHAOXING_AI_MODEL", "")).strip()

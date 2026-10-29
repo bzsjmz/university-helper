@@ -2,7 +2,7 @@
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "学道",
   "version": "1.5.0",
-  "identifier": "xyz.cornna.shuake",
+  "identifier": "io.github.bzsjmz.university-helper",
   "build": {
     "beforeDevCommand": "",
     "beforeBuildCommand": "",
@@ -42,7 +42,8 @@
         "language": "zh-CN"
       },
       "nsis": {
-        "installerHooks": "./windows/hooks.nsh"
+        "installerHooks": "./windows/hooks.nsh",
+        "installMode": "currentUser"
       }
     },
     "macOS": {
@@ -56,13 +57,16 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "resources": {
+      "resources/browsers/": "browsers/"
+    }
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDFBQTk3MTBBREEyNUU2RUQKUldUdDVpWGFDbkdwR2tFVm5rb2VRYWRSdVJBZkZMQm5vY0ZoRWVYcTYxQ2JrTG5lQWF4TXB2aGkK",
+      "pubkey": "",
       "endpoints": [
-        "https://github.com/sweetcornna/university-helper/releases/latest/download/latest.json"
+        "https://github.com/bzsjmz/university-helper/releases/latest/download/latest.json"
       ]
     }
   }

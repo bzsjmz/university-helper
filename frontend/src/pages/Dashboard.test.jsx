@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, test, vi } from 'vitest'
 
 import { RuntimeProfileContext } from '../components/runtimeProfileContext'
 import { api } from '../utils/api'
-import Dashboard from './Dashboard'
+import { LegacyDashboard as Dashboard } from './Dashboard'
 
 vi.mock('../utils/api', () => ({ api: vi.fn() }))
 

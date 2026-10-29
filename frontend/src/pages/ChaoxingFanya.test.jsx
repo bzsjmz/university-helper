@@ -106,7 +106,7 @@ vi.mock('./chaoxing-fanya/components/CourseListSection', () => ({
   ),
 }))
 
-import ChaoxingFanya from './ChaoxingFanya'
+import { LegacyChaoxingFanya as ChaoxingFanya } from './ChaoxingFanya'
 
 const selectCourseAndStart = async () => {
   const user = userEvent.setup()

@@ -6,6 +6,8 @@
 
 <h1 align="center">University Helper</h1>
 
+**Personal desktop edition:** Windows first, with macOS and Linux builds retained. See the [fork desktop guide](./docs/DESKTOP.md) for the current workbench, installation and release status. No Docker, Python or PostgreSQL installation is required; use this fork’s `desktop-v…` releases.
+
 <p align="center">
   <a href="../../actions/workflows/test.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/sweetcornna/university-helper/test.yml?branch=main&label=ci&style=flat-square" /></a>
   <a href="../../actions/workflows/codeql.yml"><img alt="CodeQL" src="https://img.shields.io/github/actions/workflow/status/sweetcornna/university-helper/codeql.yml?branch=main&label=codeql&style=flat-square" /></a>

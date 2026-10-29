@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { BookOpen, CheckCircle, GraduationCap, LayoutGrid, LogOut } from 'lucide-react'
+import { BookOpen, CheckCircle, GraduationCap, LayoutGrid, LogOut, Settings } from 'lucide-react'
 import { removeToken } from '../utils/auth'
 import { useRuntimeProfile } from './runtimeProfileContext'
 import ThemeToggle from './ThemeToggle'
@@ -24,6 +24,8 @@ export default function AppLayout() {
   const navigate = useNavigate()
   const location = useLocation()
   const { isLocal } = useRuntimeProfile()
+
+  const navigation = isLocal ? [...NAV, { to: '/desktop-settings', label: '桌面设置', shortLabel: '设置', icon: Settings }] : NAV
 
   const handleLogout = () => {
     if (window.confirm('确定要退出学道吗？')) {
@@ -56,7 +58,7 @@ export default function AppLayout() {
           </NavLink>
 
           <nav className="ml-2 hidden items-center gap-1 md:flex" aria-label="主要导航">
-            {NAV.map(({ to, label, icon: Icon }) => (
+            {navigation.map(({ to, label, icon: Icon }) => (
               <NavLink key={to} to={to} className={desktopLinkClass}>
                 <Icon className="h-4 w-4" aria-hidden="true" />
                 {label}
@@ -87,8 +89,8 @@ export default function AppLayout() {
         </div>
 
         <nav className="border-t border-border-subtle px-2 py-1.5 md:hidden" aria-label="服务切换">
-          <div className="mx-auto grid max-w-lg grid-cols-5 gap-1">
-            {NAV.map(({ to, label, shortLabel, icon: Icon }) => {
+          <div className={`mx-auto grid max-w-lg ${isLocal ? 'grid-cols-6' : 'grid-cols-5'} gap-1`}>
+            {navigation.map(({ to, label, shortLabel, icon: Icon }) => {
               const active = location.pathname === to
               return (
                 <NavLink

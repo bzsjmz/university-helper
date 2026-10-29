@@ -87,11 +87,10 @@ const newestTaskRecord = (records, statuses) =>
   }, null)
 
 export default function Dashboard() {
-  const { isLocal } = useRuntimeProfile()
-  return isLocal ? <LegacyDashboard /> : <TaskConsole />
+  return <TaskConsole />
 }
 
-function LegacyDashboard() {
+export function LegacyDashboard() {
   const navigate = useNavigate()
   const { isLocal } = useRuntimeProfile()
   const [snapshot, setSnapshot] = useState({

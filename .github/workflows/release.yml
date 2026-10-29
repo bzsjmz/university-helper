@@ -35,6 +35,8 @@ env:
 jobs:
   # ───────────────────────── 1. create the draft release ─────────────────────
   create-release:
+    # Fork desktop previews use desktop.yml and never publish upstream images.
+    if: github.repository == 'sweetcornna/university-helper'
     runs-on: ubuntu-latest
     permissions:
       contents: write

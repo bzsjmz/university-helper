@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import { useToast, useRuntimeProfile } from '../components'
+import { useToast } from '../components'
 import ManagedChaoxing from './ManagedChaoxing'
 
 import { CARD, getChapterId, getCourseId, mergeTaskHistory } from './chaoxing-fanya/utils'
@@ -21,11 +21,10 @@ import LogSection from './chaoxing-fanya/components/LogSection'
 
 
 export default function ChaoxingFanya() {
-  const { isLocal } = useRuntimeProfile()
-  return isLocal ? <LegacyChaoxingFanya /> : <ManagedChaoxing />
+  return <ManagedChaoxing />
 }
 
-function LegacyChaoxingFanya() {
+export function LegacyChaoxingFanya() {
 
 
   const [selectedCourses, setSelectedCourses] = useState([])

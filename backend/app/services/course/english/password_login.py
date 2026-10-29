@@ -9,6 +9,7 @@ import time
 from uuid import uuid4
 
 from .clients import PlatformError
+from .process_runtime import pipe_selector
 
 
 class PasswordLogins:
@@ -84,7 +85,7 @@ class PasswordLogins:
     @staticmethod
     def _read(job, process):
         deadline = time.monotonic() + 45
-        with selectors.DefaultSelector() as selector:
+        with pipe_selector() as selector:
             selector.register(process.stdout, selectors.EVENT_READ)
             while time.monotonic() < deadline:
                 if job['process'] is not process:

@@ -356,6 +356,8 @@ if settings.PROFILE != "local":
 # unchanged. No edits to routers or dependencies.py. Server mode skips this block
 # entirely, leaving dependency_overrides empty (runtime unchanged).
 if settings.PROFILE == "local":
+    from app.api.v1 import desktop
+    app.include_router(desktop.router, prefix="/api/v1/desktop", tags=["desktop"])
     app.dependency_overrides[get_current_user] = lambda: {"user_id": LOCAL_USER_ID}
     app.dependency_overrides[get_current_user_id] = lambda: LOCAL_USER_ID
 

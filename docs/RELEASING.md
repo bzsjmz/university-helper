@@ -1,5 +1,7 @@
 # Releasing
 
+For this fork’s Windows-first desktop preview, use [`desktop.yml`](../.github/workflows/desktop.yml) and the [desktop guide](DESKTOP.md). It builds from the selected fork commit, verifies each native platform and creates a draft release with checksums. The inherited `v*` release pipeline and upstream production deploy are gated to the upstream repository. The remainder of this document describes that inherited flow.
+
 Pushing a `v*` git tag cuts a release. The `release` workflow
 (`.github/workflows/release.yml`) starts from that tag and runs these jobs:
 

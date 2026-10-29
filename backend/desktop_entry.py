@@ -22,6 +22,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable
+from contextlib import contextmanager
 from pathlib import Path
 
 import platformdirs
@@ -44,8 +45,11 @@ def app_data_dir() -> Path:
     macOS:   ~/Library/Application Support/UniversityHelper
     Linux:   ~/.local/share/UniversityHelper
     """
-    d = Path(platformdirs.user_data_dir(APP_NAME, APP_AUTHOR))
+    override = os.environ.get("UH_DESKTOP_DATA_DIR")
+    d = Path(override) if override else Path(platformdirs.user_data_dir(APP_NAME, APP_AUTHOR))
     d.mkdir(parents=True, exist_ok=True)
+    if os.name != "nt":
+        d.chmod(0o700)
     return d
 
 
@@ -128,6 +132,13 @@ def configure_env(port: int, dist: str) -> None:
     # Writable runtime files under app-data (module defaults point at /tmp).
     os.environ["CHAOXING_COOKIES_FILE"] = str(d / "cookies.json")
     os.environ["CHAOXING_CACHE_FILE"] = str(d / "answer_cache.json")
+
+    os.environ["UH_DESKTOP_DATA"] = str(d)
+    os.environ["CHAOXING_LOCAL_BANK_FILE"] = str(d / "imported-question-bank.sqlite")
+    os.environ["CHAOXING_API_USAGE_FILE"] = str(d / "api-usage.jsonl")
+    # Load only desktop-owned settings; no server credentials enter the bundle.
+    from app.desktop_settings import apply_settings
+    apply_settings(d)
 
     # NOTE: MAIN_DB_USER/MAIN_DB_PASSWORD are intentionally NOT seeded here.
     # Workstream A made them optional when STORAGE_BACKEND == "sqlite" (the
@@ -345,7 +356,38 @@ def guard_process_lifetime() -> None:
         start_parent_watchdog(parent_pid)
 
 
+@contextmanager
+def instance_lock():
+    """Only one desktop process may execute against a user's local database."""
+    stream = (app_data_dir() / 'desktop.lock').open('a+b')
+    try:
+        if os.name == 'nt':
+            import msvcrt
+            if stream.tell() == 0:
+                stream.write(b'0')
+                stream.flush()
+            stream.seek(0)
+            try:
+                msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+            except OSError:
+                raise RuntimeError('学道已在运行，请切换到已打开的窗口') from None
+        else:
+            import fcntl
+            try:
+                fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError:
+                raise RuntimeError('学道已在运行，请切换到已打开的窗口') from None
+        yield
+    finally:
+        stream.close()
+
+
 def main() -> None:
+    with instance_lock():
+        serve()
+
+
+def serve() -> None:
     # answer_base.py reads ./config.ini relative to CWD; chdir into app-data so an
     # optional user config.ini resolves and stray writes land in a writable dir.
     # The cookies/cache/sqlite paths set above are ABSOLUTE, so chdir is safe.
@@ -385,4 +427,21 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    if sys.argv[1:] == ["--english-worker"]:
+        from app.services.course.english.worker import main as worker_main
+        worker_main()
+    elif sys.argv[1:] == ["--desktop-probe"]:
+        # Offline packaging gate: exercises JS resources and the bundled browser.
+        from app.services.course.english.forms import FORM_SCRIPT
+        from app.services.course.english.native_answers import SCRIPT
+        from playwright.sync_api import sync_playwright
+        assert FORM_SCRIPT and SCRIPT
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True, chromium_sandbox=True)
+            page = browser.new_page()
+            page.set_content("<title>desktop packaging probe</title>")
+            assert page.title() == "desktop packaging probe"
+            browser.close()
+        print("UH_DESKTOP_PROBE_OK", flush=True)
+    else:
+        main()

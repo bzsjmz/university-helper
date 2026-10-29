@@ -17,7 +17,7 @@ use tauri_plugin_shell::ShellExt;
 /// Managed state: holds the sidecar handle so we can reap it on exit / before restart.
 struct SidecarProcess(Mutex<Option<CommandChild>>);
 
-const STARTUP_TIMEOUT: Duration = Duration::from_secs(60);
+const STARTUP_TIMEOUT: Duration = Duration::from_secs(120);
 const HTTP_CONNECT_TIMEOUT: Duration = Duration::from_millis(250);
 const HTTP_IO_TIMEOUT: Duration = Duration::from_millis(750);
 const BACKEND_RETRY_DELAY: Duration = Duration::from_millis(100);
@@ -464,7 +464,13 @@ pub fn run() {
             let app_handle = app.handle().clone();
             let sidecar = match app.shell().sidecar("uh-backend") {
                 // The backend exits on its own when this process disappears.
-                Ok(command) => command.env("UH_PARENT_PID", std::process::id().to_string()),
+                Ok(command) => {
+                    let command = command.env("UH_PARENT_PID", std::process::id().to_string());
+                    match app.path().resource_dir() {
+                        Ok(dir) => command.env("PLAYWRIGHT_BROWSERS_PATH", dir.join("browsers")),
+                        Err(_) => command,
+                    }
+                },
                 Err(err) => {
                     show_startup_error(
                         &app_handle,
@@ -663,6 +669,14 @@ fn format_update_prompt(current: &str, latest: &str, notes: Option<&str>) -> Str
 
 /// Check GitHub Releases for an update and ask before installing it.
 async fn check_for_updates(app: AppHandle) {
+    // Fork previews have no updater key until the maintainer configures a keypair.
+    // Never reuse the upstream publisher's trust key.
+    if app.config().plugins.0.get("updater")
+        .and_then(|value| value.get("pubkey"))
+        .and_then(|value| value.as_str())
+        .unwrap_or_default().is_empty() {
+        return;
+    }
     use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
     use tauri_plugin_updater::UpdaterExt;
 
