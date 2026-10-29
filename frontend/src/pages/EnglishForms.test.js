@@ -1,8 +1,9 @@
 import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { afterEach, expect, test } from 'vitest'
 
-const script = readFileSync(process.env.ENGLISH_FORM_SCRIPT || new URL('../../../backend/app/services/course/english/question_form.js', import.meta.url), 'utf8')
-const nativeScript = readFileSync(process.env.ENGLISH_NATIVE_SCRIPT || new URL('../../../backend/app/services/course/english/native_answers.js', import.meta.url), 'utf8')
+const script = readFileSync(process.env.ENGLISH_FORM_SCRIPT || resolve('../backend/app/services/course/english/question_form.js'), 'utf8')
+const nativeScript = readFileSync(process.env.ENGLISH_NATIVE_SCRIPT || resolve('../backend/app/services/course/english/native_answers.js'), 'utf8')
 const originalRects = HTMLElement.prototype.getClientRects
 HTMLElement.prototype.getClientRects = function () { return this.hidden ? [] : [{}] }
 const extract = () => window.eval(`(${script})`)()

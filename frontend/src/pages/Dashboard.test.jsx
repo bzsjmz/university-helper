@@ -1,13 +1,14 @@
-import { render, screen, within } from '@testing-library/react'
+import { cleanup, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
-import { beforeEach, describe, expect, test, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
 import { RuntimeProfileContext } from '../components/runtimeProfileContext'
 import { api } from '../utils/api'
 import { LegacyDashboard as Dashboard } from './Dashboard'
 
 vi.mock('../utils/api', () => ({ api: vi.fn() }))
+afterEach(cleanup)
 
 const CASES = [
   {

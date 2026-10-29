@@ -1,8 +1,8 @@
 """Owner-scoped, encrypted account records and independent browsing sessions."""
 import hashlib
 import hmac
-import threading
 import sqlite3
+import threading
 from contextlib import contextmanager
 from uuid import uuid4
 
@@ -12,7 +12,6 @@ from app.config import settings
 from app.core.credential_crypto import decrypt_str, encrypt_str
 from app.db.session import get_db_session
 from .signin import ChaoxingSigninClient
-
 
 
 class _AccountCursor:
@@ -48,7 +47,7 @@ def account_session():
     if not settings.SQLITE_PATH:
         raise RuntimeError('Local account storage requires SQLITE_PATH')
     connection = sqlite3.connect(settings.SQLITE_PATH, timeout=5)
-    connection.row_factory = lambda cur, row: dict(zip((c[0] for c in cur.description), row))
+    connection.row_factory = lambda cur, row: dict(zip((c[0] for c in cur.description), row, strict=True))
     try:
         with connection:
             yield _AccountConnection(connection)

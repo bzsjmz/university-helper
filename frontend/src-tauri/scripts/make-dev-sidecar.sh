@@ -12,4 +12,7 @@ case "$TRIPLE" in
 esac
 cp "$SRC" "$DEST"
 chmod +x "$DEST"
+# cargo test uses a stub backend and must not download a browser runtime.
+mkdir -p resources/browsers
+printf 'Development placeholder; release builds install Chromium.\n' > resources/browsers/dev-placeholder.txt
 echo "wrote $DEST"
