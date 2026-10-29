@@ -39,17 +39,17 @@ class WelearnControlsTest(unittest.TestCase):
           <select hidden><option>audio speed</option></select></et-item>
           <script>setTimeout(()=>window.nativeCommit=true,3000)</script>''') as page:
             started = time.monotonic()
-            frames = wait_content(page, started + 15)
-            self.assertGreaterEqual(time.monotonic() - started, 5)
+            frames = wait_content(page, started + 20)
+            self.assertGreaterEqual(time.monotonic() - started, 10)
             result = answer_page(page, lambda q: self.fail('Reading cannot request AI'), frames=frames, allow_reading=True)
             self.assertEqual(result['status'], 'visited')
             self.assertTrue(page.evaluate('window.nativeCommit'))
 
-    def test_unknown_loaded_content_also_stays_five_seconds(self):
+    def test_unknown_loaded_content_also_stays_ten_seconds(self):
         with fixture('<et-item><p>An unsupported matching task is still loaded content.</p><et-matching>unknown</et-matching></et-item>') as page:
             started = time.monotonic()
-            frames = wait_content(page, started + 15)
-            self.assertGreaterEqual(time.monotonic() - started, 5)
+            frames = wait_content(page, started + 20)
+            self.assertGreaterEqual(time.monotonic() - started, 10)
             result = answer_page(page, lambda q: self.fail('Unknown control cannot request AI'), frames=frames, allow_reading=True)
             self.assertEqual(result['status'], 'needs_manual')
             self.assertEqual(result['counts']['unsupported'], 1)
@@ -110,9 +110,9 @@ class WelearnControlsTest(unittest.TestCase):
           <div class="optionsPicker" hidden><ul><li option="calm" onclick="window.wrong=true">calm</li>
           <li option="brave" onclick="document.querySelector('et-blank .blank').textContent='brave';this.closest('.optionsPicker').hidden=true;window.nativePick=true">brave</li></ul></div>''') as page:
             started = time.monotonic()
-            frames = wait_content(page, started + 15)
+            frames = wait_content(page, started + 20)
             self.assertTrue(frames)
-            self.assertLess(time.monotonic() - started, 10)
+            self.assertLess(time.monotonic() - started, 15)
             result = answer_page(page, native_only, native=NativeAnswers(), frames=frames)
             self.assertEqual(result['counts']['unsupported'], 0)
             self.assertEqual(result['counts']['filled'], 1)

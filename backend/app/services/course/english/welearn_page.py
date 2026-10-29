@@ -4,7 +4,7 @@ from urllib.parse import urlsplit
 
 from .forms import frame_visible
 
-MINIMUM_CONTENT_SECONDS = 5.0
+MINIMUM_CONTENT_SECONDS = 10.0
 
 
 def wait_content(page, deadline):
@@ -31,7 +31,7 @@ def wait_content(page, deadline):
                 ready.append(frame)
         if ready:
             # Native reading pages commit after three seconds. Keep every loaded
-            # lesson/tab open for at least five, including unsupported content.
+            # lesson/tab open for at least ten, including unsupported content.
             # Small waits keep browser events running; the parent can still stop
             # this disposable worker and the existing lesson budget still applies.
             settled = time.monotonic() + MINIMUM_CONTENT_SECONDS

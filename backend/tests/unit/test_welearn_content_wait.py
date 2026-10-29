@@ -18,18 +18,18 @@ def content(monkeypatch):
     return page, frame, clock
 
 
-def test_loaded_content_remains_open_five_seconds(content):
+def test_loaded_content_remains_open_ten_seconds(content):
     page, frame, clock = content
     assert welearn_page.wait_content(page, 30) == [frame]
-    assert clock.now == pytest.approx(5.0)
+    assert clock.now == pytest.approx(10.0)
     assert max(call.args[0] for call in page.wait_for_timeout.call_args_list) <= 200
 
 
-def test_five_seconds_start_after_content_becomes_ready(content):
+def test_ten_seconds_start_after_content_becomes_ready(content):
     page, frame, clock = content
     frame.evaluate.side_effect = lambda script: clock.now >= 2
     assert welearn_page.wait_content(page, 30) == [frame]
-    assert clock.now >= 7.0
+    assert clock.now >= 12.0
 
 
 def test_budget_expiry_does_not_return_content_before_minimum(content):
