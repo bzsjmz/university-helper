@@ -1,0 +1,51 @@
+name: Publish reviewed desktop preview
+
+# Push this marker only after reviewing the completed draft's installers.
+# It publishes existing artifacts; it does not rebuild or deploy any service.
+on:
+  push:
+    tags: ['publish-desktop-v*']
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_MARKER: ${{ github.ref_name }}
+    steps:
+      - name: Validate and publish the completed desktop draft
+        run: |
+          set -euo pipefail
+          VERSION="${RELEASE_MARKER#publish-desktop-v}"
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-beta\.[0-9]+)?$ ]] || exit 2
+          export VERSION
+          TAG="desktop-v$VERSION"
+          gh release view "$TAG" --json tagName,isDraft,assets > release.json
+          python3 - <<'PY'
+          import json
+          import os
+          with open('release.json') as stream:
+              release = json.load(stream)
+          version = os.environ['VERSION']
+          targets = {
+              'x86_64-pc-windows-msvc': ('.exe', '.msi'),
+              'x86_64-unknown-linux-gnu': ('.AppImage', '.deb'),
+              'aarch64-apple-darwin': ('.dmg',),
+              'x86_64-apple-darwin': ('.dmg',),
+          }
+          expected = {'SHA256SUMS'} | {
+              f'xuedao_{version}_{target}{extension}'
+              for target, extensions in targets.items() for extension in extensions
+          }
+          assets = {asset['name']: asset for asset in release['assets']}
+          if release['tagName'] != f'desktop-v{version}' or not release['isDraft']:
+              raise SystemExit('Expected an existing, reviewed desktop draft')
+          if set(assets) != expected or any(asset['size'] <= 0 for asset in assets.values()):
+              raise SystemExit('Required desktop installers/checksums are missing')
+          PY
+          gh release edit "$TAG" --draft=false --prerelease --latest=false
+          gh release view "$TAG" --json tagName,isDraft,isPrerelease,url
