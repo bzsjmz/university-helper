@@ -59,7 +59,9 @@
       "icons/icon.ico"
     ],
     "resources": {
-      "resources/browsers/": "browsers/"
+      "resources/browsers/": "browsers/",
+      "../../LICENSE": "licenses/UniversityHelper.LICENSE",
+      "../../third_party/english-learning/": "licenses/english-learning/"
     }
   },
   "plugins": {

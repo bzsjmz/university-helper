@@ -7,7 +7,7 @@ on:
     inputs:
       version:
         description: 'Desktop preview version (X.Y.Z or X.Y.Z-beta.N)'
-        default: '1.6.0-beta.3'
+        default: '1.6.0-beta.4'
         required: true
 
 permissions:
