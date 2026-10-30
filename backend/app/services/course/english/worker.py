@@ -30,8 +30,13 @@ def main():
                     _, items = client.items(request['course'])
                     result = {'items': items}
                 elif action == 'answer':
-                    result = welearn_answer(request['credential'], request['course'], request['item'],
-                        request['seconds'], ask_parent, submit=request.get('submit', False))
+                    if request.get('recording_bypass', False):
+                        from .clients import welearn_answer as recording_answer
+                        result = recording_answer(request['credential'], request['course'], request['item'],
+                            request['seconds'], ask_parent, submit=request.get('submit', False), recording_bypass=True)
+                    else:
+                        result = welearn_answer(request['credential'], request['course'], request['item'],
+                            request['seconds'], ask_parent, submit=request.get('submit', False))
                 else:
                     result = client.study(request['course'], request['item'], request['seconds'])
             finally:

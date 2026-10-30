@@ -164,7 +164,7 @@ def test_api_authentication_and_owner_forwarding(monkeypatch):
     routes.english_manager.list.assert_called_once_with('alice')
     monkeypatch.setattr(routes.english_manager, 'start', Mock(return_value={'id': 'task'}))
     assert client.post('/sessions/s/tasks', json={'course': 'c', 'item': 'i', 'seconds': 60}).status_code == 200
-    routes.english_manager.start.assert_called_once_with('alice', 's', 'c', 'i', 60, 'study', False, False, '')
+    routes.english_manager.start.assert_called_once_with('alice', 's', 'c', 'i', 60, 'study', False, False, '', False)
     for seconds in (0, 1801, True, 30.5, '60'):
         assert client.post('/sessions/s/tasks', json={'course': 'c', 'item': 'i', 'seconds': seconds}).status_code == 422
 
@@ -479,3 +479,42 @@ def test_uai5_failed_or_changed_bookshelf_is_not_success(status, payload):
     response.body.return_value = json.dumps(payload).encode()
     with pytest.raises(PlatformError): courses(context)
     response.dispose.assert_called_once()
+
+
+@pytest.mark.parametrize('mode,submit', [('study', False), ('answer', False)])
+def test_recording_bypass_requires_explicit_answer_submission(mode, submit):
+    from pydantic import ValidationError
+    from app.api.v1.english_learning import StartRequest
+    with pytest.raises(ValidationError):
+        StartRequest(course='c', item='i', mode=mode, submit=submit, recording_bypass=True)
+
+
+def test_recording_bypass_flag_is_strict_and_off_by_default():
+    from pydantic import ValidationError
+    from app.api.v1.english_learning import StartRequest
+    assert StartRequest(course='c', item='i', mode='answer', submit=True).recording_bypass is False
+    with pytest.raises(ValidationError):
+        StartRequest(course='c', item='i', mode='answer', submit=True, recording_bypass='true')
+
+
+@pytest.mark.parametrize('completed', [True, False])
+def test_experimental_recording_submission_requires_catalog_confirmation(monkeypatch, completed):
+    from contextlib import nullcontext
+    from app.services.course.english import forms, welearn_page
+    client = Mock()
+    client.items.return_value = ({'cid': 'c'}, [{'id': 'leaf', 'progress': 'false'}])
+    client.item_complete.return_value = completed
+    monkeypatch.setattr(clients, 'Welearn', Mock(return_value=client, BASE='https://welearn.sflep.com'))
+    context, page, frame = Mock(), Mock(), Mock()
+    context.cookies.return_value = []
+    monkeypatch.setattr(clients, 'unipus_browser', lambda *a, **kw: nullcontext((context, page)))
+    monkeypatch.setattr(welearn_page, 'wait_content', lambda *a: [frame])
+    monkeypatch.setattr(welearn_page, 'return_to_catalog', Mock())
+    answer = Mock(return_value={'status':'finished', 'message':'native receipt',
+        'counts':{'questions':1,'filled':1,'submitted':1,'recordings_bypassed':2}})
+    monkeypatch.setattr(forms, 'answer_page', answer)
+    result = clients.welearn_answer('sid=fixture', 'c', 'leaf', 60, Mock(), submit=True, recording_bypass=True)
+    assert answer.call_args.kwargs['recording_bypass'] is True
+    assert result['status'] == ('finished' if completed else 'needs_manual')
+    assert result['counts'].get('platform_completed', 0) == int(completed)
+    client.sco.assert_not_called()

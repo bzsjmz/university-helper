@@ -1,4 +1,4 @@
-"""Native browser form answering, without synthetic grade/completion writes."""
+"""Native form answering with an explicit WE Learn recording experiment."""
 import re
 import time
 from pathlib import Path
@@ -184,7 +184,7 @@ def advance_tab(page, frames, deadline):
     return False
 
 
-def answer_page(page, solve, *, submit=False, deadline=None, native=None, frames=None, allow_reading=False, allow_tabs=False):
+def answer_page(page, solve, *, submit=False, deadline=None, native=None, frames=None, allow_reading=False, allow_tabs=False, recording_bypass=False):
     """All frames are checked before filling; one unknown control blocks submission.
 
     Default callers handle one selected page. WE Learn may opt into its
@@ -212,15 +212,25 @@ def answer_page(page, solve, *, submit=False, deadline=None, native=None, frames
         if snapshot['questions']:
             forms.append((frame, snapshot))
             counts['questions'] += len(snapshot['questions'])
+    bypass_frames = []
+    if recording_bypass and submit and allow_reading and recording_state_known and recordings and not counts['unsupported']:
+        from .welearn_recordings import bypass_recordings
+        for frame, snapshot in snapshots:
+            if not snapshot.get('recordings'):
+                continue
+            expected = bypass_recordings(frame)
+            if expected is None or expected != snapshot['recordings']:
+                return {'status': 'needs_manual', 'message': '当前录音组件不兼容实验处理，未提交', 'counts': counts}
+            bypass_frames.append((frame, expected))
     recording_only_ready = (allow_reading and recording_state_known and not counts['questions'] and not counts['unsupported']
-                            and not recordings and any(
-                                frame.locator('et-recorder:visible, et-talk:visible').count() for frame, _ in snapshots))
+                            and (not recordings or bypass_frames) and any(
+                                frame.locator('et-recorder:visible, et-follow-me:visible, et-talk:visible').count() for frame, _ in snapshots))
     if not counts['questions'] and not recording_only_ready:
         if allow_tabs and not counts['unsupported'] and not recordings and advance_tab(page, frames, deadline):
             return {'status': 'advanced', 'message': '已访问课节内阅读页，继续下一题页', 'counts': {**counts, 'visited': 1, 'pages_advanced': 1}}
-        if allow_reading and any(frame.locator('et-talk:visible, et-recorder:visible').count() for frame in frames):
+        if allow_reading and any(frame.locator('et-talk:visible, et-follow-me:visible, et-recorder:visible').count() for frame in frames):
             from .welearn_recordings import recording_message
-            required = recordings or sum(frame.locator('et-talk:visible, et-recorder:visible').count() for frame in frames)
+            required = recordings or sum(frame.locator('et-talk:visible, et-follow-me:visible, et-recorder:visible').count() for frame in frames)
             return {'status': 'needs_manual', 'message': recording_message(recording_details, required),
                     'counts': {**counts, 'recordings_required': required}}
         if allow_reading and not counts['unsupported'] and any(frame.evaluate(r'''() => {
@@ -229,7 +239,7 @@ def answer_page(page, solve, *, submit=False, deadline=None, native=None, frames
             !e.closest('[hidden],[aria-hidden="true"]');
           const item = document.querySelector('et-item[notscored]');
           return !!item && (item.innerText || '').trim().length >= 30 &&
-            ![...item.querySelectorAll('et-blank,et-choice,et-select,et-tof,et-matching,et-sort,et-recorder,et-talk,input,textarea,select,[contenteditable],[data-controltype="filling"],[data-controltype="choice"]')].some(visible);
+            ![...item.querySelectorAll('et-blank,et-choice,et-select,et-tof,et-matching,et-sort,et-recorder,et-follow-me,et-talk,input,textarea,select,[contenteditable],[data-controltype="filling"],[data-controltype="choice"]')].some(visible);
         }''') for frame in frames):
             return {'status': 'visited', 'message': '已访问无需填写的课件，正在核对平台进度',
                     'counts': {**counts, 'visited': 1}}
@@ -280,7 +290,7 @@ def answer_page(page, solve, *, submit=False, deadline=None, native=None, frames
     for frame, snapshot, answers in plans:
         if not frame_visible(frame) or read_form(frame) != snapshot or not all(verify_question(frame, q, a) for q, a in zip(snapshot['questions'], answers)):
             return {'status': 'needs_manual', 'message': '填写后页面或答案变化，未提交', 'counts': counts}
-    if allow_reading and recordings:
+    if allow_reading and recordings and not bypass_frames:
         from .welearn_recordings import recording_message
         return {'status': 'needs_manual',
                 'message': recording_message(recording_details, recordings, mixed=True),
@@ -288,6 +298,14 @@ def answer_page(page, solve, *, submit=False, deadline=None, native=None, frames
     if recording_only_ready and any(not frame_visible(frame) or read_form(frame) != snapshot
                                     for frame, snapshot in snapshots):
         return {'status': 'needs_manual', 'message': '录音页面状态变化，未保存或提交', 'counts': counts}
+    if bypass_frames:
+        if deadline is not None and time.monotonic() >= deadline:
+            return {'status': 'needs_manual', 'message': '答题预算耗尽，未进行录音实验提交', 'counts': counts}
+        for frame, expected in bypass_frames:
+            applied = bypass_recordings(frame, apply=True)
+            if applied != expected:
+                return {'status': 'needs_manual', 'message': '录音实验处理未确认，未点击提交；请在官网核对', 'counts': counts}
+            counts['recordings_bypassed'] = counts.get('recordings_bypassed', 0) + applied
     names = ('提交', '提交作业', '提交答案', 'Submit') if submit else ('保存', '暂存', '保存答案', '保存作业', 'Save', 'Save answers')
     candidates = [(frame, button(frame, names)) for frame in frames if frame_visible(frame)]
     candidates = [(frame, candidate) for frame, candidate in candidates if candidate is not None]

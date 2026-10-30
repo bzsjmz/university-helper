@@ -45,6 +45,7 @@ class EnglishManager:
     def public(task):
         result = {key: task[key] for key in ('id', 'platform', 'course_name', 'item_name',
                 'seconds', 'status', 'message', 'started_at', 'mode', 'submit', 'allow_ai')}
+        result['recording_bypass'] = task.get('recording_bypass', False)
         result['counts'] = dict(task.get('counts', {}))
         result.update(total_items=task.get('total_items', 1), completed_items=task.get('completed_items', 0),
                       current_item=task.get('current_item', task['item_name']), results=list(task.get('results', [])))
@@ -195,7 +196,7 @@ class EnglishManager:
             if self.closing or sum(s['owner'] == owner for s in self.sessions.values()) >= 10:
                 raise PlatformError('请先断开不用的会话，或稍后重试')
             self.sessions[sid] = session
-        return {'session_id': sid, 'courses': courses}
+        return {'session_id': sid, 'platform': platform, 'courses': courses}
 
     def session(self, owner, sid):
         self.cleanup()
@@ -222,11 +223,13 @@ class EnglishManager:
             with self.lock:
                 session['busy'] = False
 
-    def start(self, owner, sid, course, item, seconds, mode='study', submit=False, allow_ai=False, end_item=''):
+    def start(self, owner, sid, course, item, seconds, mode='study', submit=False, allow_ai=False, end_item='', recording_bypass=False):
         with self.lock:
             session = self.session(owner, sid)
             if session['busy']:
                 raise PlatformError('该会话已有操作正在执行')
+            if recording_bypass and (session['platform'] != 'welearn' or mode != 'answer' or not submit):
+                raise PlatformError('录音实验处理仅适用于 WE Learn 自动答题且须勾选自动提交')
             catalog = session['items'].get(course, [])
             ids = [i['id'] for i in catalog]
             end_item = end_item or item
@@ -243,7 +246,7 @@ class EnglishManager:
                     'total_items': len(selected_items), 'completed_items': 0, 'current_item': selected['name'], 'results': [], 'seconds': seconds, 'status': 'running',
                     'message': '限时学习会话执行中', 'started_at': time.time(),
                     'updated': time.monotonic(), 'cancel': threading.Event(),
-                    'mode': mode, 'submit': submit, 'allow_ai': allow_ai, 'counts': {}}
+                    'mode': mode, 'submit': submit, 'allow_ai': allow_ai, 'recording_bypass': recording_bypass, 'counts': {}}
             session['busy'] = True
             self.tasks[task['id']] = task
             def run():
@@ -256,7 +259,7 @@ class EnglishManager:
                         with self.lock:
                             task.update(current_item=selected['name'], message='正在处理：' + selected['name'], counts=dict(totals))
                         result = self.execute({'platform': session['platform'], 'action': 'answer' if mode == 'answer' else 'study',
-                            'submit': submit, 'allow_ai': allow_ai,
+                            'submit': submit, 'allow_ai': allow_ai, 'recording_bypass': recording_bypass,
                             'credential': decrypt_str(session['credential']), 'course': course,
                             'item': selected['id'], 'seconds': seconds, 'expected_name': selected['name']}, task)
                         for key, value in result.get('counts', {}).items():

@@ -62,6 +62,7 @@ class StartRequest(ItemsRequest):
     mode: Literal['study', 'answer'] = 'study'
     submit: StrictBool = False
     allow_ai: StrictBool = False
+    recording_bypass: StrictBool = False
     seconds: int = Field(default=60, ge=30, le=1800, strict=True)
 
 
@@ -69,6 +70,8 @@ class StartRequest(ItemsRequest):
     def answering_options(self):
         if self.mode != 'answer' and (self.submit or self.allow_ai):
             raise ValueError('自动提交与 AI 选项仅适用于自动答题模式')
+        if self.recording_bypass and (self.mode != 'answer' or not self.submit):
+            raise ValueError('录音实验处理需要自动答题和自动提交')
         return self
 
 
@@ -127,7 +130,7 @@ async def items(sid: str, request: ItemsRequest, owner=Depends(get_current_user_
 @router.post('/sessions/{sid}/tasks')
 async def start(sid: str, request: StartRequest, owner=Depends(get_current_user_id)):
     return await call(english_manager.start, owner, sid, request.course, request.item, request.seconds,
-                      request.mode, request.submit, request.allow_ai, request.end_item)
+                      request.mode, request.submit, request.allow_ai, request.end_item, request.recording_bypass)
 
 
 @router.delete('/sessions/{sid}')

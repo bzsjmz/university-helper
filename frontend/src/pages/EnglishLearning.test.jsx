@@ -9,7 +9,7 @@ beforeEach(() => {
   mocks.api.mockReset()
   mocks.api.mockImplementation(async (path) => {
     if (path === '/english-learning/tasks') return { tasks: [] }
-    if (path === '/english-learning/sessions') return { session_id: 's', courses: [{ id: 'c', name: 'English A' }, { id: 'd', name: 'English B' }] }
+    if (path === '/english-learning/sessions') return { session_id: 's', platform: 'welearn', courses: [{ id: 'c', name: 'English A' }, { id: 'd', name: 'English B' }] }
     if (path.endsWith('/items')) return { items: [{ id: 'i', name: 'Reading' }] }
     if (path.endsWith('/tasks')) return { id: 't', status: 'running', item_name: 'Reading', seconds: 60 }
     return {}
@@ -34,7 +34,7 @@ test('requires explicit course/content selection; credentials excluded from task
   await user.click(screen.getByRole('button', { name: '确认并启动' }))
   await waitFor(() => expect(mocks.api).toHaveBeenCalledWith('/english-learning/sessions/s/tasks', expect.anything()))
   const body = mocks.api.mock.calls.find(([path]) => path.endsWith('/s/tasks'))[1].body
-  expect(JSON.parse(body)).toEqual({ course: 'c', item: 'i', end_item: 'i', seconds: 300, mode: 'answer', submit: false, allow_ai: true })
+  expect(JSON.parse(body)).toEqual({ course: 'c', item: 'i', end_item: 'i', seconds: 300, mode: 'answer', submit: false, allow_ai: true, recording_bypass: false })
   expect(body).not.toContain('private')
   expect(JSON.stringify(localStorage)).not.toContain('private')
   await user.selectOptions(screen.getByLabelText('课程'), 'd')
@@ -119,4 +119,30 @@ test('successful login with empty courses leaves login view and explains the emp
   expect(screen.queryByLabelText('密码')).not.toBeInTheDocument()
   expect(screen.getByLabelText('课程')).toBeVisible()
   expect(screen.getByRole('button', { name: '读取课程内容' })).toBeDisabled()
+})
+
+
+test('recording experiment requires submission, explicit opt-in, and resets with submission disabled', async () => {
+  const user = userEvent.setup()
+  render(<EnglishLearning />)
+  await user.click(screen.getByText('高级：导入已有登录会话'))
+  await user.type(screen.getByLabelText('Cookie'), 'sid=fixture')
+  await user.click(screen.getByRole('button', { name: '连接并读取课程' }))
+  await user.selectOptions(await screen.findByLabelText('课程'), 'c')
+  await user.click(screen.getByRole('button', { name: '读取课程内容' }))
+  await screen.findAllByRole('option', { name: /Reading/ })
+  await user.selectOptions(screen.getByLabelText('范围起点'), 'i')
+  const experiment = screen.getByRole('checkbox', { name: /实验：尝试绕过/ })
+  const submit = screen.getByRole('checkbox', { name: /整页答案完整/ })
+  expect(experiment).toBeDisabled()
+  expect(experiment).not.toBeChecked()
+  await user.click(submit)
+  await user.click(experiment)
+  expect(screen.getByText(/不生成可播放音频/)).toBeVisible()
+  await user.click(screen.getByRole('button', { name: '确认并启动' }))
+  const calls = mocks.api.mock.calls.filter(([path]) => path.endsWith('/s/tasks'))
+  expect(JSON.parse(calls[0][1].body)).toMatchObject({submit:true, recording_bypass:true})
+  await user.click(submit)
+  expect(experiment).not.toBeChecked()
+  expect(experiment).toBeDisabled()
 })

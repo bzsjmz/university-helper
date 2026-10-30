@@ -19,6 +19,7 @@ export default function EnglishLearning() {
   const [mode, setMode] = useState('answer')
   const [submit, setSubmit] = useState(false)
   const [allowAi, setAllowAi] = useState(true)
+  const [recordingBypass, setRecordingBypass] = useState(false)
   const [tasks, setTasks] = useState([])
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
@@ -52,6 +53,7 @@ export default function EnglishLearning() {
 
   const connected = useCallback((result) => {
     setSession(result)
+    setRecordingBypass(false)
     setCourse('')
     setMessage(result.courses.length ? '登录成功。请选择课程并读取内容。' : '登录成功，但平台未返回可用课程。请在官网确认已开通教材或加入班级后重新登录。')
   }, [])
@@ -70,7 +72,7 @@ export default function EnglishLearning() {
 
   const start = () => perform(async () => {
     const task = await api(`/english-learning/sessions/${session.session_id}/tasks`, {
-      method: 'POST', body: JSON.stringify({ course, item, end_item: endItem, seconds: Number(seconds), mode, submit: mode === 'answer' && submit, allow_ai: mode === 'answer' && allowAi }),
+      method: 'POST', body: JSON.stringify({ course, item, end_item: endItem, seconds: Number(seconds), mode, submit: mode === 'answer' && submit, allow_ai: mode === 'answer' && allowAi, recording_bypass: session.platform === 'welearn' && mode === 'answer' && submit && recordingBypass }),
     })
     if (alive.current) setTasks((old) => [...old, task])
   })
@@ -83,7 +85,7 @@ export default function EnglishLearning() {
       </div>
       <div className="rounded-xl border border-border bg-surface p-4 text-sm leading-7">
         <p>支持所选范围内各内容当前页的自动答题/作业保存，也可切换为限时学习。WE Learn 优先读取课件自带答案，其次查缓存，最后才按选项使用 AI；遇到缺失答案或不支持的题型会停止提交。</p>
-        <p>自动提交须单独勾选；平台回执未确认时不会重试提交。验证码、监考、口语录音和无文本的听力需要人工处理，暂不自动考试。</p>
+        <p>自动提交须单独勾选；平台回执未确认时不会重试提交。验证码、监考和无文本的听力需要人工处理；WE Learn 录音可单独启用实验处理，暂不自动考试。</p>
         <p>使用平台账号密码登录，验证码在本页完成。登录会话短期保留，退出或服务重启后需要重新登录。</p>
       </div>
       {!session ? (
@@ -119,7 +121,9 @@ export default function EnglishLearning() {
           {mode === 'answer' && <div className="space-y-2 text-sm">
             <p>默认尝试保存，最终状态以平台回执为准。仅有 Submit 的课件需勾选自动提交；没有保存按钮时，仅填写不会保留或计为完成。</p>
             <label className="flex gap-2"><input type="checkbox" checked={allowAi} disabled={busy} onChange={(e) => setAllowAi(e.target.checked)} />课件与缓存均未命中时使用服务器 AI（可能产生费用）</label>
-            <label className="flex gap-2"><input type="checkbox" checked={submit} disabled={busy} onChange={(e) => setSubmit(e.target.checked)} />整页答案完整并复核通过后，自动提交所选练习／作业</label>
+            <label className="flex gap-2"><input type="checkbox" checked={submit} disabled={busy} onChange={(e) => { setSubmit(e.target.checked); if (!e.target.checked) setRecordingBypass(false) }} />整页答案完整并复核通过后，自动提交所选练习／作业</label>
+            {session.platform === 'welearn' && <label className="flex gap-2"><input type="checkbox" checked={recordingBypass && submit} disabled={busy || !submit} onChange={(e) => setRecordingBypass(e.target.checked)} />实验：尝试绕过所选课节的录音要求（需自动提交）</label>}
+            {session.platform === 'welearn' && recordingBypass && submit && <p>此模式仅尝试提交录音完成记录，不生成可播放音频；朗读／对话使用 0 分占位，不代表真实测评。是否完成以平台回读为准。</p>}
           </div>}
           <label className="block">{mode === 'answer' ? '每节答题预算' : '每节会话时长'}（秒，30–1800）
             <input className={field} type="number" min="30" max="1800" step="1" value={seconds} onChange={(e) => setSeconds(e.target.value)} disabled={busy} />
@@ -144,9 +148,10 @@ export default function EnglishLearning() {
             <p>{task.platform === 'welearn' ? 'WE Learn' : 'U校园 5.0（AI版）'} · {task.course_name}</p>
             <p>{task.item_name} · {task.mode === 'answer' ? '自动答题' : '限时学习'} · {task.total_items > 1 ? '每节 ' : ''}{task.seconds} 秒 · {statuses[task.status] || task.status}</p>
             <p className="mt-2 text-sm text-text-muted">{task.message}</p>
+            {task.recording_bypass && <p className="text-sm">本任务已启用录音实验处理；不生成真实音频。</p>}
             {task.total_items > 1 && <p className="text-sm">进度 {task.completed_items}/{task.total_items} · 当前：{task.current_item}</p>}
             {task.total_items > 1 && task.results?.length > 0 && <details className="mt-2 text-sm"><summary>逐节结果</summary>{task.results.map((r, index) => <p key={index}>{r.name} · {statuses[r.status] || r.status} · {r.message}</p>)}</details>}
-            {task.mode === 'answer' && <p className="text-sm">已访问 {task.counts?.visited || 0} · 平台确认完成 {task.counts?.platform_completed || 0} · 题目 {task.counts?.questions || 0} · 有答案 {task.counts?.answered || 0} · 课件答案 {task.counts?.native_answers || 0} · 缓存 {task.counts?.cache_hits || 0} · AI作答 {task.counts?.ai_answers || 0} · 已填 {task.counts?.filled || 0} · 缺失 {task.counts?.missing || 0} · 不支持 {task.counts?.unsupported || 0} · 已保存 {task.counts?.saved || 0} · 已提交 {task.counts?.submitted || 0} · 平台拒绝提交 {task.counts?.submission_rejected || 0} · 回执未确认 {task.counts?.submission_unknown || 0}</p>}
+            {task.mode === 'answer' && <p className="text-sm">已访问 {task.counts?.visited || 0} · 平台确认完成 {task.counts?.platform_completed || 0} · 题目 {task.counts?.questions || 0} · 有答案 {task.counts?.answered || 0} · 课件答案 {task.counts?.native_answers || 0} · 缓存 {task.counts?.cache_hits || 0} · AI作答 {task.counts?.ai_answers || 0} · 已填 {task.counts?.filled || 0} · 缺失 {task.counts?.missing || 0} · 不支持 {task.counts?.unsupported || 0} · 录音实验处理 {task.counts?.recordings_bypassed || 0} · 已保存 {task.counts?.saved || 0} · 已提交 {task.counts?.submitted || 0} · 平台拒绝提交 {task.counts?.submission_rejected || 0} · 回执未确认 {task.counts?.submission_unknown || 0}</p>}
             {['running', 'stopping'].includes(task.status) && <button className={`${button} mt-3`} disabled={busy || task.status === 'stopping'} onClick={() => perform(async () => {
               const result = await api(`/english-learning/tasks/${task.id}/stop`, { method: 'POST' })
               if (alive.current) setTasks((old) => old.map((t) => t.id === task.id ? result.task : t))

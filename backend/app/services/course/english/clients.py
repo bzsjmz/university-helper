@@ -249,7 +249,7 @@ def unipus(credential, url, *, item=None, seconds=0, expected_name=None, solve=N
     return run(credential, url, item=item, seconds=seconds, expected_name=expected_name, solve=solve, submit=submit)
 
 
-def welearn_answer(credential, cid, item, seconds, solve, submit=False):
+def welearn_answer(credential, cid, item, seconds, solve, submit=False, recording_bypass=False):
     from .welearn_page import wait_content, return_to_catalog
     client = Welearn(credential)
     try:
@@ -273,7 +273,8 @@ def welearn_answer(credential, cid, item, seconds, solve, submit=False):
             totals = {}
             for _ in range(20):
                 result = answer_page(page, solve, submit=submit, deadline=deadline, native=native,
-                                     frames=frames, allow_reading=True, allow_tabs=True)
+                                     frames=frames, allow_reading=True, allow_tabs=True,
+                                     **({'recording_bypass': True} if recording_bypass and submit else {}))
                 for key, value in result['counts'].items():
                     if type(value) is int and value >= 0:
                         totals[key] = totals.get(key, 0) + value
@@ -292,9 +293,9 @@ def welearn_answer(credential, cid, item, seconds, solve, submit=False):
             fully_filled = (result['counts'].get('questions', 0) > 0
                             and result['counts'].get('filled') == result['counts']['questions']
                             and not result['counts'].get('unsupported') and not result['counts'].get('missing'))
-            if result['status'] == 'visited' or fully_filled or result['counts'].get('submitted'):
+            if result['status'] == 'visited' or fully_filled or result['counts'].get('submitted') or result['counts'].get('recordings_bypassed'):
                 # Use the real courseware exit to let its SCORM runtime save.
-                # Never write fabricated completion/score fields.
+                # Native UI receipts also require catalog confirmation for recording experiments.
                 return_to_catalog(page)
                 for cookie in context.cookies([Welearn.BASE]):
                     client.session.cookies.set(cookie['name'], cookie['value'], domain='welearn.sflep.com', path='/')
@@ -311,6 +312,8 @@ def welearn_answer(credential, cid, item, seconds, solve, submit=False):
                     result['counts']['platform_completed'] = 1
                     result['counts']['submission_unknown'] = 0
                     result.update(status='finished', message='平台已确认课节完成')
+                elif result['counts'].get('recordings_bypassed'):
+                    result.update(status='needs_manual', message='录音实验提交后平台尚未确认课节完成；请在官网核对，勿直接重复提交')
                 elif result['status'] == 'visited':
                     result.update(status='needs_manual', message='已访问无需填写的课件；平台尚未确认完成，未伪报完成')
                 elif not result['counts'].get('questions') and result['counts'].get('submitted'):

@@ -113,14 +113,21 @@
       control_types:rows.map(() => 'welearn-option'), values:[], native_values:nativeValues});
   }
   if (questions.length > 100) return { questions: [], unsupported: editable.length, blocked: true };
-  const pendingRecordings = [...document.querySelectorAll('et-recorder,et-talk')].filter(e => {
-    if (!visible(e) || e.parentElement?.closest('et-talk,et-recorder') || e.closest('[noprogress]')) return false;
+  const pendingRecordings = [...document.querySelectorAll('et-recorder,et-follow-me,et-talk')].filter(e => {
+    if (!visible(e) || e.parentElement?.closest('et-talk,et-follow-me,et-recorder') || e.closest('[noprogress]')) return false;
     // Existing recordings restored by the platform need no new recording. This
     // is a read-only check; the native submit still validates the whole lesson.
     if (e.matches('et-recorder')) try {
       const recorder = window.angular?.element(e).controller('etRecorder');
       if (Number.isFinite(recorder?.recordingCount) && recorder.recordingCount > 0 &&
           recorder.isRecording === false && recorder.reset === false) return false;
+    } catch (_) {}
+    if (!e.matches('et-recorder')) try {
+      const name = e.matches('et-follow-me') ? 'etFollowMe' : 'etTalk';
+      const control = window.angular?.element(e).controller(name);
+      if (Number.isInteger(control?.recordingCount) && control.recordingCount > 0 &&
+          control.isRecording !== true && control.isTalking !== true && control.reset !== true &&
+          (name === 'etTalk' || control.isCompleted?.() === true)) return false;
     } catch (_) {}
     return true;
   });
@@ -129,7 +136,7 @@
     try { recorder = window.angular?.element(e).controller('etRecorder'); } catch (_) {}
     const script = typeof recorder?.script === 'string' ? recorder.script : (e.getAttribute('script') || '');
     return {id: e.id || '', kind: e.matches('et-recorder') ? 'recording' : 'conversation',
-      scored: !!script.trim() || recorder?.scriptFlag === true,
+      scored: e.matches('et-follow-me') || !!script.trim() || recorder?.scriptFlag === true,
       script: script.slice(0,10000), app_required: recorder?.isMobile === false};
   });
   return { questions, unsupported, blocked: false, recordings: pendingRecordings.length, recording_details };
