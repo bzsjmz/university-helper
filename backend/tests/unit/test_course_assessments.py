@@ -96,7 +96,9 @@ def test_list_failure_explains_safe_reason_without_exposing_address(service):
     service.get = Mock(side_effect=ca.AssessmentUnavailable('不支持的试卷地址'))
     report = Mock()
     assert service.run(COURSE, homework=True, report=report)['failed'] == 1
-    report.assert_called_once_with('课程作业列表读取失败：不支持的试卷地址', 'warning')
+    assert report.call_args_list[0].args == ('开始读取课程作业列表', 'info')
+    report.assert_any_call('课程作业列表读取失败：不支持的试卷地址；未能确认是否存在待处理项目，不代表考试或作业不及格', 'warning')
+    assert 'https://' not in str(report.call_args_list)
 
 
 @pytest.mark.parametrize('prefix', ['', '/mooc-ans'])

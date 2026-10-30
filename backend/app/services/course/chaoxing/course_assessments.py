@@ -444,6 +444,7 @@ class CourseAssessmentService:
             if not enabled:
                 continue
             checkpoint()
+            report(f'开始读取{label}列表', 'info')
             try:
                 with control.job_scope(checkpoint, answering=True):
                     checkpoint()
@@ -452,12 +453,13 @@ class CourseAssessmentService:
                 raise
             except AssessmentUnavailable as exc:
                 summary['failed'] += 1
-                report(f'{label}列表读取失败：{exc}', 'warning')
+                report(f'{label}列表读取失败：{exc}；未能确认是否存在待处理项目，不代表考试或作业不及格', 'warning')
                 continue
             except Exception:
                 summary['failed'] += 1
                 report(f'{label}列表读取失败，需人工核对', 'warning')
                 continue
+            report(f'{label}列表读取成功，共 {len(items)} 项', 'info')
             for item in items:
                 checkpoint()
                 if kind == 'homework' and selected_titles is not None and item['title'] not in selected_titles:

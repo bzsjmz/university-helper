@@ -16,6 +16,7 @@ from .learning import ChapterTask, JobProcessor, init_chaoxing
 from .payload_mapper import normalize_tiku_config
 from .course_assessments import CourseAssessmentService
 from . import query_control as control
+from .exceptions import diagnostic_reason
 from .task_admission import (
     MAX_ACTIVE_TASKS,
     TaskAlreadyActiveError,
@@ -649,6 +650,12 @@ class ChaoxingLearningManager:
                 video_progress=None,
             )
             self._append_task_log(task_id, f"Start course: {course_name}", "info")
+            scopes = [label for enabled, label in (
+                (payload.get("learn_chapters", True), "章节学习"),
+                (payload.get("course_homework"), "课程作业"),
+                (payload.get("course_exams"), "课程考试"),
+            ) if enabled]
+            self._append_task_log(task_id, "本轮处理范围：" + "、".join(scopes), "info")
 
             points = []
             chapter_fetch_failed = False
@@ -658,7 +665,7 @@ class ChaoxingLearningManager:
                     points = list(points_payload.get("points") or [])
                 except Exception as exc:
                     chapter_fetch_failed = True
-                    self._append_task_log(task_id, f"Fetch chapters failed for {course_name}: {exc}", "error")
+                    self._append_task_log(task_id, f"课程【{course_name}】章节目录读取失败：{diagnostic_reason(exc)}", "error")
             end_point_id = _chapter_limit_for(course, chapter_limits) if payload.get("learn_chapters", True) else None
             if end_point_id:
                 limited_points = _points_up_to(points, end_point_id)
@@ -738,6 +745,12 @@ class ChaoxingLearningManager:
             run_config["video_progress_callback"] = video_progress_callback
             run_config["should_stop"] = stop_event.is_set
 
+            def chapter_log_callback(_, point, message, level):
+                title = " ".join(str(point.get("title") or "未命名章节").split())[:160]
+                self._append_task_log(task_id, f"课程【{course_name}】章节【{title}】：{message}", level)
+
+            run_config["chapter_log_callback"] = chapter_log_callback
+
             try:
                 failed_chapters = []
                 if payload.get("learn_chapters", True) and chapter_tasks:
@@ -745,6 +758,7 @@ class ChaoxingLearningManager:
                     processor.run()
                     failed_chapters = processor.failed_tasks
                 assessment_failed = False
+                assessment_failures = 0
                 if payload.get("course_homework") or payload.get("course_exams"):
                     def assessment_checkpoint():
                         if not self._wait_for_resume(task_id, pause_event, stop_event):
@@ -761,6 +775,7 @@ class ChaoxingLearningManager:
                     for key, value in summary.items():
                         self._increase_progress(task_id, "assessments_" + key, value)
                     assessment_failed = bool(summary["failed"])
+                    assessment_failures = summary["failed"]
 
                 if stop_event.is_set():
                     self._cancel_task(task_id, "Task cancelled by user")
@@ -769,7 +784,10 @@ class ChaoxingLearningManager:
                     failed_courses += 1
                     self._append_task_log(
                         task_id,
-                        f"Course finished with {len(failed_chapters)} failed chapters or unfinished assessments: {course_name}",
+                        f"课程【{course_name}】处理结束：章节失败 {len(failed_chapters)} 项；"
+                        f"课程作业/考试未完成或检查异常 {assessment_failures} 项"
+                        + ("；章节目录读取失败" if chapter_fetch_failed else "")
+                        + "。已完成部分保留，具体原因见前面的分项日志。",
                         "warning",
                     )
                 else:
@@ -777,7 +795,7 @@ class ChaoxingLearningManager:
                     self._append_task_log(task_id, f"Course completed: {course_name}", "success")
             except Exception as exc:
                 failed_courses += 1
-                self._append_task_log(task_id, f"Course execution failed {course_name}: {exc}", "error")
+                self._append_task_log(task_id, f"课程【{course_name}】执行异常：{diagnostic_reason(exc)}", "error")
 
             self._update_progress(
                 task_id,

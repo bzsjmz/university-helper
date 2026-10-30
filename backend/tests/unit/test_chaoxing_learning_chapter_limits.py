@@ -91,6 +91,31 @@ def test_chapter_concurrency_above_16_reaches_worker_unchanged(worker, monkeypat
     assert captured['jobs'] == 32
 
 
+@pytest.mark.parametrize('chapters,assessments', [(2, 1), (0, 1), (2, 0)])
+def test_failure_summary_separates_chapters_and_assessment_checks(worker, monkeypatch, chapters, assessments):
+    class Processor:
+        def __init__(self, client, course, tasks, config):
+            self.failed_tasks = tasks[:chapters]
+            self.config, self.course, self.tasks = config, course, tasks
+        def run(self):
+            for task in self.failed_tasks:
+                self.config['chapter_log_callback'](self.course, task.point, '读取任务列表：HTTP 403', 'error')
+    class Assessments:
+        def __init__(self, client):
+            pass
+        def run(self, *args, **kwargs):
+            return {'submitted': 0, 'saved': 0, 'skipped': 0, 'failed': assessments}
+    monkeypatch.setattr(lm, 'JobProcessor', Processor)
+    monkeypatch.setattr(lm, 'CourseAssessmentService', Assessments)
+    task, _ = worker(course_ids=['100_200_300'], course_exams=True)
+    messages = _log_messages(task)
+    assert task['status'] == 'failed'
+    assert any(f'章节失败 {chapters} 项；课程作业/考试未完成或检查异常 {assessments} 项' in msg for msg in messages)
+    assert any('本轮处理范围：章节学习、课程考试' in msg for msg in messages)
+    if chapters:
+        assert any('课程【Course A】章节【1.1 Intro】' in msg and 'HTTP 403' in msg for msg in messages)
+
+
 def test_limit_stops_the_course_at_the_chosen_chapter(worker):
     task, processed = worker(
         course_ids=["100_200_300", "101_201_301"],

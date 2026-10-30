@@ -91,8 +91,9 @@ class ChaoxingCourseDataService:
         for _resp in responses:
             if _resp.status_code != 200:
                 logger.error(f"未知错误: {_resp.status_code} 正在跳过")
-                logger.error(_resp.text)
-                return [], {}
+                # Preserve the safe reason for the task UI without logging the
+                # response body (which may include platform tokens/user data).
+                return [], {"_read_error": f"章节任务列表请求失败（HTTP {_resp.status_code}）"}
 
             _job_list, _job_info = decode_course_card(_resp.text)
             if _job_info.get("notOpen", False):

@@ -29,7 +29,7 @@ from app.services.notification import NotificationFactory
 
 from .answer import Tiku
 from .client import Account, Chaoxing, StudyResult
-from .exceptions import InputFormatError, LoginError
+from .exceptions import InputFormatError, LoginError, diagnostic_reason
 from .live import Live
 from .live_process import LiveProcessor
 from . import query_control as control
@@ -251,7 +251,7 @@ def process_job(chaoxing, course, job, job_info, speed, progress_callback=None, 
         return StudyResult.CANCELLED
     except control.QueryExpired:
         logger.warning("答题任务点超时，停止本次处理")
-        return StudyResult.ERROR
+        return StudyResult.TIMEOUT
 
 
 def _process_job(
@@ -360,22 +360,43 @@ def _process_jobs_inline(
     for job in jobs:
         if should_stop(config):
             return ChapterResult.CANCELLED
-        result = process_job(
-            chaoxing,
-            course,
-            job,
-            job_info,
-            speed,
-            progress_callback=video_progress_callback,
-            should_stop_callback=stop_callback,
-        )
+        try:
+            result = process_job(
+                chaoxing, course, job, job_info, speed,
+                progress_callback=video_progress_callback,
+                should_stop_callback=stop_callback,
+            )
+        except Exception as exc:
+            _chapter_detail(config, f"{_job_label(job)}：{diagnostic_reason(exc)}")
+            raise
         if result == StudyResult.CANCELLED:
             return ChapterResult.CANCELLED
         if result == StudyResult.NOT_OPEN:
+            _report_job_failure(config, job, result)
             return ChapterResult.NOT_OPEN
         if result.is_failure():
+            _report_job_failure(config, job, result)
             return ChapterResult.ERROR
     return None
+
+
+def _chapter_detail(config, message):
+    callback = config.get("chapter_diagnostic_callback") if config else None
+    if callable(callback):
+        callback(message)
+
+
+def _job_label(job):
+    return {"video": "视频/音频", "document": "文档", "workid": "章节测验",
+            "read": "阅读", "live": "直播"}.get(job.get("type"), "未知类型任务点")
+
+
+def _report_job_failure(config, job, result):
+    reason = {StudyResult.NOT_OPEN: "尚未开放或前置条件未满足",
+              StudyResult.FORBIDDEN: "平台拒绝请求（HTTP 403）",
+              StudyResult.TIMEOUT: "处理超时",
+              StudyResult.ERROR: "处理失败，平台未确认完成"}.get(result, "未能确认完成")
+    _chapter_detail(config, f"{_job_label(job)}：{reason}")
 
 
 @dataclass
@@ -384,6 +405,7 @@ class ChapterTask:
     point: dict[str, Any]
     result: ChapterResult = ChapterResult.PENDING
     tries: int = 0
+    last_detail: str = ""
 
     def __lt__(self, other: "ChapterTask") -> bool:
         # Retries yield to chapters with fewer attempts. Never compare point
@@ -416,6 +438,55 @@ class JobProcessor:
         # run() exits mid-retry (F05).
         self._pending_retries = 0
         self._retry_lock = threading.Lock()
+
+    def _process_task(self, task):
+        # Each attempt has its own callback/config. Concurrent chapters must
+        # never overwrite a shared "current chapter" or another task's reason.
+        config = dict(self.config)
+        task.last_detail = ""
+        config["chapter_diagnostic_callback"] = lambda message: setattr(task, "last_detail", message)
+        try:
+            result = process_chapter(self.chaoxing, self.course, task.point, self.speed, config)
+        except control.QueryCancelled:
+            result = ChapterResult.CANCELLED
+        except control.QueryExpired:
+            task.last_detail = "章节执行：处理时间预算耗尽"
+            result = ChapterResult.ERROR
+        except Exception as exc:
+            logger.exception("Chapter processing crashed: {}", task.point.get("title", "unknown"))
+            task.last_detail = task.last_detail or (
+                "章节执行：线程资源不足" if _is_thread_start_failure(exc)
+                else "章节执行：" + diagnostic_reason(exc)
+            )
+            result = ChapterResult.ERROR
+
+        callback = self.config.get("chapter_log_callback")
+        message = None
+        level = "warning"
+        attempt = task.tries + 1
+        if result in (ChapterResult.ERROR, ChapterResult.NOT_OPEN):
+            reason = task.last_detail or (
+                "章节尚未开放或前置测验未完成" if result == ChapterResult.NOT_OPEN
+                else "章节处理失败，未能确认完成"
+            )
+            if result == ChapterResult.NOT_OPEN and self.config.get("notopen_action") == "continue":
+                action = "已按配置跳过，不代表平台已完成"
+            elif attempt >= self.max_tries:
+                action = "已达尝试上限，本章未完成"
+                level = "error"
+            else:
+                action = "稍后重试，先处理其他章节"
+            message = f"第 {attempt}/{self.max_tries} 次尝试：{reason}；{action}"
+        elif result == ChapterResult.SUCCESS and task.tries:
+            message = f"第 {attempt}/{self.max_tries} 次尝试成功"
+            level = "success"
+        if message and callable(callback):
+            try:
+                callback(self.course, task.point, message, level)
+            except Exception:
+                # Reporting must not replay a completed platform operation.
+                logger.warning("Chapter diagnostic callback failed")
+        return result
 
     def _wait_retry(self, task, stop_event=None):
         delay = min(30, control.setting("CHAOXING_CHAPTER_RETRY_DELAY_SECONDS", 2) * max(1, task.tries))
@@ -635,11 +706,7 @@ class JobProcessor:
                 self._drain_pending_tasks()
                 return
 
-            try:
-                task.result = process_chapter(self.chaoxing, self.course, task.point, self.speed, self.config)
-            except Exception:
-                logger.exception("Chapter processing crashed: {}", task.point.get("title", "unknown"))
-                task.result = ChapterResult.ERROR
+            task.result = self._process_task(task)
 
             match task.result:
                 case ChapterResult.SUCCESS:
@@ -735,11 +802,7 @@ class JobProcessor:
                     return
 
                 # 处理单个章节，并在需要时通过 config 中的回调上报章节完成进度
-                try:
-                    task.result = process_chapter(self.chaoxing, self.course, task.point, self.speed, self.config)
-                except Exception:
-                    logger.exception("Chapter processing crashed: {}", task.point.get("title", "unknown"))
-                    task.result = ChapterResult.ERROR
+                task.result = self._process_task(task)
 
                 # A run-level stop can be requested while process_chapter is in
                 # flight.  Do not create a fresh retry after shutdown starts.
@@ -890,18 +953,28 @@ def process_chapter(
 
     # 获取当前章节的所有任务点
     job_info = None
-    jobs, job_info = chaoxing.get_job_list(course, point)
+    try:
+        jobs, job_info = chaoxing.get_job_list(course, point)
+    except Exception as exc:
+        _chapter_detail(config, "读取章节任务列表：" + diagnostic_reason(exc))
+        raise
     if should_stop(config):
         return ChapterResult.CANCELLED
 
     # 发现未开放章节, 根据配置处理
     if job_info and job_info.get("notOpen", False):
+        _chapter_detail(config, "章节尚未开放，可能有前置测验或开放时间限制")
         return ChapterResult.NOT_OPEN
 
-    # get_job_list 失败时会返回 ({}, {}) —— 既无 jobs 也无 job_info，
+    if job_info and job_info.get("_read_error"):
+        _chapter_detail(config, job_info["_read_error"])
+        return ChapterResult.ERROR
+
+    # 兼容旧客户端返回的空 jobs/job_info；
     # 不能把它当成"空任务/已完成"静默成功，否则章节会被错误标记 SUCCESS。
     if not job_info and not jobs:
         logger.error("获取章节任务列表失败: {}", point.get("title", "unknown"))
+        _chapter_detail(config, "未识别到章节任务数据，可能是页面格式变化或返回了登录/验证页面")
         return ChapterResult.ERROR
 
     # 已经默认处理空任务，此处不需要判断
@@ -918,20 +991,21 @@ def process_chapter(
     fast_shutdown = False
     try:
         pending = set()
+        future_jobs = {}
         try:
             for job in jobs:
-                pending.add(
-                    executor.submit(
-                        process_job,
-                        chaoxing,
-                        course,
-                        job,
-                        job_info,
-                        speed,
-                        progress_callback=video_progress_callback,
-                        should_stop_callback=stop_callback,
-                    )
+                future = executor.submit(
+                    process_job,
+                    chaoxing,
+                    course,
+                    job,
+                    job_info,
+                    speed,
+                    progress_callback=video_progress_callback,
+                    should_stop_callback=stop_callback,
                 )
+                pending.add(future)
+                future_jobs[future] = job
         except RuntimeError as exc:
             if not _is_thread_start_failure(exc):
                 raise
@@ -939,6 +1013,7 @@ def process_chapter(
             if pending:
                 # Some points already started: never replay them inline while
                 # their original workers may still submit answers.
+                _chapter_detail(config, "任务点执行：线程资源不足")
                 return ChapterResult.ERROR
             for future in pending:
                 future.cancel()
@@ -957,7 +1032,11 @@ def process_chapter(
             if not done:
                 continue
             for future in done:
-                result = future.result()
+                try:
+                    result = future.result()
+                except Exception as exc:
+                    _chapter_detail(config, f"{_job_label(future_jobs[future])}：{diagnostic_reason(exc)}")
+                    raise
                 job_results.append(result)
                 if result == StudyResult.CANCELLED:
                     fast_shutdown = True
@@ -965,11 +1044,13 @@ def process_chapter(
                         pending_future.cancel()
                     return ChapterResult.CANCELLED
                 if result == StudyResult.NOT_OPEN:
+                    _report_job_failure(config, future_jobs[future], result)
                     fast_shutdown = True
                     for pending_future in pending:
                         pending_future.cancel()
                     return ChapterResult.NOT_OPEN
                 if result.is_failure():
+                    _report_job_failure(config, future_jobs[future], result)
                     fast_shutdown = True
                     for pending_future in pending:
                         pending_future.cancel()
