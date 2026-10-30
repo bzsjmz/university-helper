@@ -116,6 +116,11 @@ async def cancel_login(lid: str, owner=Depends(get_current_user_id)):
     return {'cancelled': True}
 
 
+@router.get('/sessions')
+async def sessions(owner=Depends(get_current_user_id)):
+    return {'sessions': await call(english_manager.list_sessions, owner)}
+
+
 @router.post('/sessions')
 async def connect(request: ConnectRequest, owner=Depends(get_current_user_id)):
     return await call(english_manager.connect, owner, request.platform,

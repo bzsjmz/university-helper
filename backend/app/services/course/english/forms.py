@@ -51,25 +51,40 @@ def control_value(locator, kind):
     return locator.inner_text() if kind == 'contenteditable' else locator.input_value()
 
 
+def matching_value_equal(locator, expected):
+    actual = control_value(locator, 'welearn-match')
+    if actual == expected:
+        return True
+    # The authored i/g flags explicitly allow case-insensitive answers. Other
+    # text inputs and case-sensitive matching blanks retain exact comparison.
+    insensitive = locator.evaluate("e => !!e.closest('et-blank[i],et-blank[g]')")
+    return insensitive and re.sub(r'\s+', ' ', actual).strip().lower() == re.sub(r'\s+', ' ', expected).strip().lower()
+
+
 def fill_matching(frame, locator, value):
-    """Use the courseware's focus/picker events; never assign Angular state."""
-    if control_value(locator, 'welearn-match') == value:
+    """Use the courseware picker, respecting its declared comparison rules."""
+    if matching_value_equal(locator, value):
         return True
     locator.click()
     picker = frame.locator('.optionsPicker:visible')
     if picker.count() != 1:
         return False
     options = picker.locator('[option], [preoption]')
-    matches = options.evaluate_all(r'''(es, answer) => es.map((e,i) => {
+    insensitive = locator.evaluate("e => !!e.closest('et-blank[i],et-blank[g]')")
+    matches = options.evaluate_all(r'''(es, args) => {
       const norm = s => (s || '').replace(/\s+/g,' ').trim();
-      const value = e.hasAttribute('preoption') ? norm(e.textContent).slice(0,1) :
-        norm(e.getAttribute('option') || e.textContent);
-      return value === norm(answer) ? i : -1;
-    }).filter(i => i >= 0)''', value)
+      const values = es.map(e => e.hasAttribute('preoption') ? norm(e.textContent).slice(0,1) :
+        norm(e.getAttribute('option') || e.textContent));
+      const key = norm(args.answer);
+      const exact = values.map((value,i) => value === key ? i : -1).filter(i => i >= 0);
+      if (exact.length || !args.insensitive) return exact;
+      return values.map((value,i) => !es[i].hasAttribute('preoption') &&
+        value.toLowerCase() === key.toLowerCase() ? i : -1).filter(i => i >= 0);
+    }''', {'answer': value, 'insensitive': insensitive})
     if len(matches) != 1:
         return False
     options.nth(matches[0]).click()
-    return control_value(locator, 'welearn-match') == value
+    return matching_value_equal(locator, value)
 
 
 def fill_question(frame, question, answer):
@@ -109,7 +124,8 @@ def fill_question(frame, question, answer):
             locator.dispatch_event('keyup', {'key': 'Unidentified'})
             locator.press('Tab')
         locator.dispatch_event('change')
-    return all(control_value(locator, kind) == value for locator, value, kind in zip(controls, answer, kinds))
+    return all(matching_value_equal(locator, value) if kind == 'welearn-match' else control_value(locator, kind) == value
+               for locator, value, kind in zip(controls, answer, kinds))
 
 
 def verify_question(frame, question, answer):
@@ -120,7 +136,8 @@ def verify_question(frame, question, answer):
         if question['values']:
             return controls[0].input_value() == question['values'][answer[0]]
         return all(locator.is_checked() == (i in answer) for i, locator in enumerate(controls))
-    return all(control_value(locator, kind) == value for locator, value, kind in zip(controls, answer, question.get('control_types', ['text'] * len(controls))))
+    return all(matching_value_equal(locator, value) if kind == 'welearn-match' else control_value(locator, kind) == value
+               for locator, value, kind in zip(controls, answer, question.get('control_types', ['text'] * len(controls))))
 
 
 def button(frame, names):

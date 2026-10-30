@@ -198,6 +198,13 @@ class EnglishManager:
             self.sessions[sid] = session
         return {'session_id': sid, 'platform': platform, 'courses': courses}
 
+    def list_sessions(self, owner):
+        self.cleanup()
+        with self.lock:
+            return [{'session_id': sid, 'platform': session['platform'],
+                     'courses': [dict(c) for c in session['courses']], 'busy': session['busy']}
+                    for sid, session in self.sessions.items() if session['owner'] == owner]
+
     def session(self, owner, sid):
         self.cleanup()
         session = self.sessions.get(sid)

@@ -518,3 +518,15 @@ def test_experimental_recording_submission_requires_catalog_confirmation(monkeyp
     assert result['status'] == ('finished' if completed else 'needs_manual')
     assert result['counts'].get('platform_completed', 0) == int(completed)
     client.sco.assert_not_called()
+
+
+def test_list_sessions_is_owner_scoped_and_excludes_credentials(manager):
+    alice = manager.connect('alice', 'welearn', 'sid=private')['session_id']
+    manager.connect('bob', 'welearn', 'sid=other-private')
+    sessions = manager.list_sessions('alice')
+    assert len(sessions) == 1 and sessions[0]['session_id'] == alice
+    assert sessions[0]['platform'] == 'welearn'
+    assert 'credential' not in sessions[0]
+    assert 'private' not in json.dumps(sessions)
+    sessions[0]['courses'][0]['name'] = 'changed'
+    assert manager.sessions[alice]['courses'][0]['name'] != 'changed'
