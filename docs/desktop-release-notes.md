@@ -1,9 +1,14 @@
-# 学道桌面版 1.6.0-beta.6
+# 学道桌面版 1.6.0-beta.7
 
 Windows 优先，同时提供 macOS（Apple Silicon / Intel）和 Linux 安装包。
 安装后直接打开，无需安装 Docker、Python 或 PostgreSQL，也不需要注册管理账号。
 
 本次更新：
+
+- 修复 Windows 本地模式的 WE Learn 微信扫码登录：二维码显示后，等待扫码的子进程不再使用仅支持 socket 的管道监听方式，避免二维码出现后消失、扫码与否均提示授权未完成。
+- 登录管道异常显示可区分的安全错误码；补充真实 Windows 管道回归，覆盖等待扫码期间的浏览器事件处理、连续操作和关闭流程。
+
+继续保留 beta.6 的工作台更新：
 
 - WE Learn 拆为独立工作台：加密保存登录、多账号管理、不同账号并发，支持本课程课节全选、全部课程与课节全选，以及启动前的范围预览。
 - WE Learn 账号和任务历史保存在本机 SQLite。刷新及重启后保留登录记录；平台会话过期仍需更新登录。任务中断后可按原范围重新启动，读取平台进度并跳过已完成课节。
@@ -22,5 +27,7 @@ Windows 优先，同时提供 macOS（Apple Silicon / Intel）和 Linux 安装�
 请先停止任务再关闭或升级。电脑休眠、退出或进程重启后，执行线程不会自动恢复；可按原配置重新启动并重新读取平台进度。
 
 此预览包未配置本 fork 的自动更新签名，须手动下载安装更新；Windows 可能显示未签名提示，macOS 未公证。请从本仓库下载并核对 SHA256SUMS。安装包构建检查不代表所有真实课程均已验收。
+
+AI 默认接口仍为 `https://api.deepseek.com/chat/completions`。若保存时报“请填写有效的公网 AI 接口地址”，需检查本机 DNS 与代理 Fake-IP；本次不改变公网地址校验，也不包含代理兼容性调整。
 
 详细安装、数据目录和故障处理见 [桌面版使用说明](https://github.com/bzsjmz/university-helper/blob/main/docs/DESKTOP.md)。
