@@ -7,7 +7,7 @@ on:
     inputs:
       version:
         description: 'Desktop preview version (X.Y.Z or X.Y.Z-beta.N)'
-        default: '1.6.0-beta.5'
+        default: '1.6.0-beta.6'
         required: true
 
 permissions:
@@ -47,6 +47,7 @@ jobs:
           tests/unit/test_desktop_processes.py tests/unit/test_desktop_packaging.py tests/unit/test_managed_account_tasks.py
           tests/unit/test_english_learning.py tests/unit/test_english_password_login.py
           tests/unit/test_english_answering.py tests/unit/test_ai_server_config.py
+          tests/unit/test_welearn_workbench.py tests/unit/test_welearn_content_wait.py tests/unit/test_welearn_ai_pacing.py
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '20'
@@ -56,8 +57,8 @@ jobs:
         working-directory: frontend
         run: |
           npm ci
-          npm test -- run src/pages/DesktopSettings.test.jsx src/pages/DesktopRoutes.test.jsx src/pages/ManagedChaoxing.test.jsx src/pages/BatchChaoxing.test.jsx src/pages/TaskConsole.test.jsx src/pages/Dashboard.test.jsx src/pages/ChaoxingFanya.test.jsx src/App.smoke.test.jsx --pool=forks --poolOptions.forks.singleFork --testTimeout=15000
-          npx eslint src/pages/DesktopSettings.jsx src/pages/DesktopRoutes.test.jsx src/pages/DesktopSettings.test.jsx src/App.jsx src/components/AppLayout.jsx src/pages/Dashboard.jsx src/pages/ChaoxingFanya.jsx --max-warnings 0
+          npm test -- run src/pages/DesktopSettings.test.jsx src/pages/DesktopRoutes.test.jsx src/pages/ManagedChaoxing.test.jsx src/pages/BatchChaoxing.test.jsx src/pages/TaskConsole.test.jsx src/pages/Dashboard.test.jsx src/pages/ChaoxingFanya.test.jsx src/App.smoke.test.jsx src/pages/WelearnWorkbench.test.jsx src/pages/EnglishLogin.test.jsx src/pages/EnglishLearning.test.jsx --pool=forks --poolOptions.forks.singleFork --testTimeout=15000
+          npx eslint src/pages/DesktopSettings.jsx src/pages/DesktopRoutes.test.jsx src/pages/DesktopSettings.test.jsx src/App.jsx src/components/AppLayout.jsx src/pages/Dashboard.jsx src/pages/ChaoxingFanya.jsx src/pages/WelearnWorkbench.jsx src/pages/EnglishLogin.jsx src/pages/EnglishLearning.jsx src/App.smoke.test.jsx --max-warnings 0
           npm run build
 
   build:
@@ -109,7 +110,7 @@ jobs:
       - name: Verify worker pipes on this operating system
         shell: bash
         working-directory: backend
-        run: python -m pytest -c /dev/null -q tests/unit/test_desktop_processes.py tests/unit/test_desktop_accounts.py tests/unit/test_desktop_settings.py
+        run: python -m pytest -c /dev/null -q tests/unit/test_desktop_processes.py tests/unit/test_desktop_accounts.py tests/unit/test_desktop_settings.py tests/unit/test_welearn_workbench.py
       - name: Bundle the English browser
         shell: bash
         run: |

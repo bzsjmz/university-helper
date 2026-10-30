@@ -2,6 +2,7 @@
 import json
 import os
 import queue
+import re
 import subprocess
 import sys
 import tempfile
@@ -45,6 +46,8 @@ def main():
                     return json.load(reply)
             assert get('/api/v1/runtime')['profile'] == 'local'
             assert get('/api/v1/learning-accounts') == {'accounts': []}
+            assert get('/api/v1/welearn/accounts') == {'accounts': []}
+            assert get('/api/v1/welearn/tasks') == {'tasks': []}
             assert not get('/api/v1/desktop/settings')['primary_configured']
             request = Request(base + '/api/v1/learning-accounts',
                 data=json.dumps({'username': 'packaging-fixture', 'password': 'offline-fixture'}).encode(),
@@ -54,6 +57,15 @@ def main():
             assert len(get('/api/v1/learning-accounts')['accounts']) == 1
             with urlopen(base + '/dashboard', timeout=5) as reply:
                 assert b'<html' in reply.read().lower()
+            with urlopen(base + '/welearn', timeout=5) as reply:
+                html = reply.read().decode('utf-8')
+            scripts = re.findall(r'<script\b[^>]*\bsrc="(/assets/[^"?#]+\.js)"', html)
+            assert scripts, 'Frozen workbench entry script missing'
+            entry = b''
+            for script in scripts:
+                with urlopen(base + script, timeout=5) as reply:
+                    entry += reply.read()
+            assert b'WelearnWorkbench-' in entry and b'/welearn' in entry
             # Same executable must dispatch the worker instead of booting another API.
             worker = subprocess.run([str(binary), '--english-worker'], input=b'{"platform":"invalid","action":"invalid"}\n',
                 capture_output=True, env=environment, timeout=90, check=True)
@@ -64,7 +76,7 @@ def main():
             if probe.returncode:
                 raise RuntimeError('Offline browser probe failed: ' + probe.stderr.decode('utf-8', errors='replace')[-6000:])
             assert b'UH_DESKTOP_PROBE_OK' in probe.stdout
-            print('PASS: frozen UI, SQLite accounts, desktop settings, worker dispatch, browser and JS assets')
+            print('PASS: frozen UI and WE Learn workbench, SQLite accounts, desktop settings, worker dispatch, browser and JS assets')
         finally:
             if os.name == 'nt':
                 subprocess.run(['taskkill', '/PID', str(process.pid), '/T', '/F'],

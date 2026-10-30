@@ -44,7 +44,8 @@ describe('app shell smoke', () => {
     // Service entries appear in both the nav and the cards
     expect(screen.getAllByText('学习通签到').length).toBeGreaterThan(0)
     expect(screen.getAllByText('智慧树').length).toBeGreaterThan(0)
-    expect(screen.getAllByRole('link', { name: '英语平台试用' }).every(link => link.getAttribute('href') === '/english-learning')).toBe(true)
+    expect(screen.getAllByRole('link', { name: 'WE Learn' }).every(link => link.getAttribute('href') === '/welearn')).toBe(true)
+    expect(screen.getAllByRole('link', { name: 'U校园试用' }).every(link => link.getAttribute('href') === '/english-learning')).toBe(true)
     // Theme toggle is present (radiogroup)
     expect(screen.getByRole('radiogroup', { name: '主题' })).toBeTruthy()
   })

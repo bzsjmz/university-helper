@@ -434,6 +434,7 @@ if __name__ == "__main__":
         # Offline packaging gate: exercises JS resources and the bundled browser.
         from app.services.course.english.forms import FORM_SCRIPT
         from app.services.course.english.native_answers import SCRIPT
+        from app.services.course.english.welearn_recordings import bypass_recordings
         from playwright.sync_api import sync_playwright
         assert FORM_SCRIPT and SCRIPT
         with sync_playwright() as playwright:
@@ -441,6 +442,8 @@ if __name__ == "__main__":
             page = browser.new_page()
             page.set_content("<title>desktop packaging probe</title>")
             assert page.title() == "desktop packaging probe"
+            # Exercise the optional JS asset without recording controls or network requests.
+            assert bypass_recordings(page) == 0
             browser.close()
         print("UH_DESKTOP_PROBE_OK", flush=True)
     else:
