@@ -162,6 +162,7 @@ class PasswordLogins:
                 failure_code = ('worker_response_timeout' if isinstance(exc, PlatformError)
                                 and str(exc) == '登录页面未能正常响应，请重新登录' else 'login_failed')
             reasons = {
+                'login_channel': '登录浏览器通信异常（login_channel），请退出应用后重新打开再试',
                 'platform_timeout': '平台官网加载或跳转超时，请重新获取二维码后重试',
                 'browser_navigation': '微信授权后浏览器跳转失败，请重新获取二维码后重试',
                 'worker_response_timeout': '登录浏览器未及时响应，请重试；这不代表二维码过期',

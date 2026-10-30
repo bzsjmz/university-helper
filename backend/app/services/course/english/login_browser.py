@@ -13,7 +13,7 @@ import requests
 
 from .clients import PlatformError, Welearn, storage_state
 from .login_view import login_picture
-from .login_handoff import WechatHandoff, read_login_command
+from .login_handoff import LoginChannelError, WechatHandoff, read_login_command
 
 LOGIN_URLS = {
     'welearn': 'https://welearn.sflep.com/user/prelogin.aspx?loginret=https%3A%2F%2Fwelearn.sflep.com%2Fstudent%2Findex.aspx',
@@ -156,6 +156,8 @@ def login_browser(request):
     from playwright.sync_api import Error, TimeoutError
     try:
         _login_browser(request)
+    except LoginChannelError:
+        print(json.dumps({'ok': False, 'error_code': 'login_channel'}), flush=True)
     except TimeoutError:
         print(json.dumps({'ok': False, 'error_code': 'platform_timeout'}), flush=True)
     except Error:

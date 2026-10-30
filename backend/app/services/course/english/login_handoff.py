@@ -4,16 +4,31 @@ import sys
 import time
 from urllib.parse import urlsplit
 
+from .process_runtime import pipe_selector
+
+
+class LoginChannelError(RuntimeError):
+    """The private login command pipe could not be monitored or read."""
+
 
 def read_login_command(page, deadline):
     stream = sys.stdin.buffer
     try:
-        fd = stream.fileno()
+        stream.fileno()
     except (AttributeError, OSError):
         # In-memory transports used by offline browser fixtures.
         return stream.readline(4097)
-    with selectors.DefaultSelector() as selector:
-        selector.register(fd, selectors.EVENT_READ)
+    # Windows selectors accept sockets, not the worker's stdin pipe. Use the
+    # same platform-aware polling as the parent while pumping browser events.
+    try:
+        return _read_login_command(page, deadline, stream)
+    except (OSError, ValueError):
+        raise LoginChannelError() from None
+
+
+def _read_login_command(page, deadline, stream):
+    with pipe_selector() as selector:
+        selector.register(stream, selectors.EVENT_READ)
         while time.monotonic() < deadline:
             if selector.select(timeout=0):
                 return stream.readline(4097)

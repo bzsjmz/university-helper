@@ -255,7 +255,7 @@ def test_ai5_login_entry_matches_portal_page_instead_of_legacy_passport():
     assert LOGIN_URLS['unipus_ai'] == 'https://uai.unipus.cn/portal/sso/login'
 
 
-@pytest.mark.parametrize('code', ['platform_timeout', 'browser_navigation', 'worker_response_timeout'])
+@pytest.mark.parametrize('code', ['platform_timeout', 'browser_navigation', 'worker_response_timeout', 'login_channel'])
 def test_login_failure_reports_safe_cause_instead_of_claiming_expiry(manager, monkeypatch, code):
     monkeypatch.setattr(manager, '_spawn', fixture_worker)
     monkeypatch.setattr(manager.logins, '_read', lambda *args: {'ok': False, 'error_code': code,
