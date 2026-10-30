@@ -9,7 +9,8 @@ const NAV = [
   { to: '/dashboard', label: '工作台', shortLabel: '总览', icon: LayoutGrid },
   { to: '/chaoxing-signin', label: '学习通签到', shortLabel: '签到', icon: CheckCircle },
   { to: '/chaoxing-fanya', label: '学习通泛雅', shortLabel: '泛雅', icon: BookOpen },
-  { to: '/english-learning', label: '英语平台试用', shortLabel: '英语', icon: BookOpen },
+  { to: '/welearn', label: 'WE Learn', shortLabel: 'WE Learn', icon: BookOpen },
+  { to: '/english-learning', label: 'U校园试用', shortLabel: 'U校园', icon: BookOpen },
   { to: '/zhihuishu-panel', label: '智慧树', shortLabel: '智慧树', icon: GraduationCap },
 ]
 
@@ -57,7 +58,7 @@ export default function AppLayout() {
             <span className="text-lg font-black leading-none tracking-[0.18em] text-text">学道</span>
           </NavLink>
 
-          <nav className="ml-2 hidden items-center gap-1 md:flex" aria-label="主要导航">
+          <nav className="ml-2 hidden items-center gap-1 lg:flex" aria-label="主要导航">
             {navigation.map(({ to, label, icon: Icon }) => (
               <NavLink key={to} to={to} className={desktopLinkClass}>
                 <Icon className="h-4 w-4" aria-hidden="true" />
@@ -88,8 +89,8 @@ export default function AppLayout() {
           </div>
         </div>
 
-        <nav className="border-t border-border-subtle px-2 py-1.5 md:hidden" aria-label="服务切换">
-          <div className={`mx-auto grid max-w-lg ${isLocal ? 'grid-cols-6' : 'grid-cols-5'} gap-1`}>
+        <nav className="border-t border-border-subtle px-2 py-1.5 lg:hidden" aria-label="服务切换">
+          <div className={`mx-auto grid max-w-xl ${isLocal ? 'grid-cols-7' : 'grid-cols-6'} gap-1`}>
             {navigation.map(({ to, label, shortLabel, icon: Icon }) => {
               const active = location.pathname === to
               return (

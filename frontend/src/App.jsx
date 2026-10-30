@@ -21,6 +21,7 @@ const ChaoxingSignin = lazy(() => import('./pages/ChaoxingSignin'))
 const ChaoxingFanya = lazy(() => import('./pages/ChaoxingFanya'))
 const Zhihuishu = lazy(() => import('./pages/Zhihuishu'))
 const EnglishLearning = lazy(() => import('./pages/EnglishLearning'))
+const WelearnWorkbench = lazy(() => import('./pages/WelearnWorkbench'))
 const NotFound = lazy(() => import('./pages/NotFound'))
 
 function RuntimeRoutes() {
@@ -52,7 +53,8 @@ function RuntimeRoutes() {
             <Route path="/chaoxing-signin" element={<ChaoxingSignin />} />
             <Route path="/chaoxing-fanya" element={<ChaoxingFanya />} />
             <Route path="/zhihuishu-panel" element={<Zhihuishu />} />
-            <Route path="/english-learning" element={<EnglishLearning />} />
+            <Route path="/welearn" element={<WelearnWorkbench />} />
+            <Route path="/english-learning" element={<EnglishLearning platform="unipus_ai" />} />
           </Route>
           <Route path="/" element={<Navigate to={home} replace />} />
           <Route path="*" element={<NotFound />} />

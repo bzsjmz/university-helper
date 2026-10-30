@@ -24,7 +24,10 @@ def main():
         if platform == 'welearn':
             client = Welearn(request['credential'])
             try:
-                if action == 'connect':
+                if action == 'account':
+                    from .welearn_identity import account_identity
+                    result = account_identity(client)
+                elif action == 'connect':
                     result = {'courses': client.courses()}
                 elif action == 'items':
                     _, items = client.items(request['course'])

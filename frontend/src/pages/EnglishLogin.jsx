@@ -4,8 +4,8 @@ import { api } from '../utils/api'
 const field = 'w-full rounded-lg border border-border bg-surface p-3 text-text'
 const button = 'rounded-lg border border-border bg-surface px-4 py-2 disabled:opacity-50'
 
-export default function EnglishLogin({ onConnected }) {
-  const [platform, setPlatform] = useState('welearn')
+export default function EnglishLogin({ onConnected, fixedPlatform }) {
+  const [platform, setPlatform] = useState(fixedPlatform || 'welearn')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [credential, setCredential] = useState('')
@@ -21,7 +21,9 @@ export default function EnglishLogin({ onConnected }) {
 
   const accept = (result) => {
     if (!alive.current) return
+    if (fixedPlatform && result.platform && result.platform !== fixedPlatform) return
     if (result.status === 'connected') {
+      if (fixedPlatform && result.session?.platform !== fixedPlatform) return
       activeId.current = null
       setLogin(null)
       onConnected(result.session)
@@ -41,7 +43,7 @@ export default function EnglishLogin({ onConnected }) {
     alive.current = true
     // Recover a pending login after a refresh or a lost initial HTTP reply.
     api('/english-learning/logins').then((result) => {
-      if (alive.current && result.logins?.length && !activeId.current) acceptRef.current(result.logins[0])
+      if (alive.current && result.logins?.some(j => !fixedPlatform || j.platform === fixedPlatform) && !activeId.current) acceptRef.current(result.logins.find(j => !fixedPlatform || j.platform === fixedPlatform))
     }).catch(() => {})
     return () => {
       alive.current = false
@@ -49,7 +51,7 @@ export default function EnglishLogin({ onConnected }) {
       const lid = activeId.current
       if (lid) api(`/english-learning/logins/${lid}`, { method: 'DELETE' }).catch(() => {})
     }
-  }, [])
+  }, [fixedPlatform])
 
   const lid = login?.login_id
   useEffect(() => {
@@ -84,7 +86,7 @@ export default function EnglishLogin({ onConnected }) {
       if (alive.current) setMessage(error.message)
       try {
         const result = await api('/english-learning/logins')
-        if (alive.current && result.logins?.length) acceptRef.current(result.logins[0])
+        if (alive.current && result.logins?.some(j => !fixedPlatform || j.platform === fixedPlatform)) acceptRef.current(result.logins.find(j => !fixedPlatform || j.platform === fixedPlatform))
       } catch (_) { /* The user can retry when the connection recovers. */ }
     } finally { if (alive.current) setBusy(false) }
   }
@@ -100,7 +102,7 @@ export default function EnglishLogin({ onConnected }) {
       if (alive.current) setMessage(error.message)
       try {
         const result = await api('/english-learning/logins')
-        if (alive.current && result.logins?.length) acceptRef.current(result.logins[0])
+        if (alive.current && result.logins?.some(j => !fixedPlatform || j.platform === fixedPlatform)) acceptRef.current(result.logins.find(j => !fixedPlatform || j.platform === fixedPlatform))
       } catch (_) { /* A pending QR window can be recovered on refresh. */ }
     } finally { if (alive.current) setBusy(false) }
   }
@@ -126,11 +128,11 @@ export default function EnglishLogin({ onConnected }) {
 
   return <div className="space-y-4 rounded-xl border border-border p-5">
     {!login && <>
-      <label className="block">平台
+      {!fixedPlatform && <label className="block">平台
         <select className={field} value={platform} disabled={busy} onChange={(e) => {
           setPlatform(e.target.value); setPassword(''); setCredential(''); setUrl(''); setMessage('')
         }}><option value="welearn">WE Learn</option><option value="unipus_ai">U校园 5.0（AI版）</option></select>
-      </label>
+      </label>}
       <form className="space-y-4" onSubmit={loginWithPassword}>
         <label className="block">账号
           <input className={field} value={username} onChange={(e) => setUsername(e.target.value)}

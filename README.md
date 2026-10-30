@@ -41,6 +41,8 @@ This fork primarily maintains **Chaoxing / Fanya**, retains the inherited Chaoxi
 | WE Learn | **Experimental** | Login, course/lesson ranges, supported ET text exercises and internal tabs, native submission and completion reads. Selected live lessons have confirmed completion; loading, reading completion and special interactions still need work. Personal recordings remain manual. |
 | U-campus AI 5.0 | **Experimental** | Current portal login, bookshelf and supported course entry points. Live-material execution compatibility still needs acceptance testing; full platform coverage is not claimed. Legacy U-campus was removed. |
 
+WE Learn has a [dedicated workbench](docs/welearn-workbench.md) with encrypted saved logins, concurrent accounts, course/lesson select-all, and durable task history. Expired platform sessions still require reauthentication. The recording experiment is opt-in and produces no audio; scored recordings use zero-score placeholders.
+
 WE Learn prefers courseware answers and cache hits. Each new AI question, including the first, waits a random **20–40 seconds** before the AI call; this uses the existing answer budget. New Chaoxing tasks default to `LocalCache → AI`; GO and Yanxi are not enabled by default. An answer hit, button click or local task ending does not prove platform completion.
 
 **Deploy this fork using the [Agent deployment handbook](./docs/AGENT_DEPLOYMENT.md)** (Chinese). It covers builds from a pinned commit, private configuration, persistent state, optional English browser sandboxing, idle upgrades, backups, verification and rollback. The upstream demo and prebuilt images do not establish the version deployed from this fork.

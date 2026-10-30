@@ -6,7 +6,7 @@ const field = 'w-full rounded-lg border border-border bg-surface p-3 text-text'
 const button = 'rounded-lg border border-border bg-surface px-4 py-2 disabled:opacity-50'
 const statuses = { running: '执行中', stopping: '停止中', cancelled: '已停止', failed: '失败', finished: '执行结束', needs_manual: '需人工处理' }
 
-export default function EnglishLearning() {
+export default function EnglishLearning({ platform }) {
   const [session, setSession] = useState(null)
   const [course, setCourse] = useState('')
   const [items, setItems] = useState([])
@@ -80,8 +80,8 @@ export default function EnglishLearning() {
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       <div>
-        <h1 className="text-2xl font-bold">英语平台试用</h1>
-        <p className="mt-2 text-text-muted">WE Learn · U校园 5.0（AI版）</p>
+        <h1 className="text-2xl font-bold">{platform ? 'U校园试用' : '英语平台试用'}</h1>
+        <p className="mt-2 text-text-muted">{platform ? 'U校园 5.0（AI版） · WE Learn 已移至独立工作台' : 'WE Learn · U校园 5.0（AI版）'}</p>
       </div>
       <div className="rounded-xl border border-border bg-surface p-4 text-sm leading-7">
         <p>支持所选范围内各内容当前页的自动答题/作业保存，也可切换为限时学习。WE Learn 优先读取课件自带答案，其次查缓存，最后才按选项使用 AI；遇到缺失答案或不支持的题型会停止提交。</p>
@@ -89,7 +89,7 @@ export default function EnglishLearning() {
         <p>使用平台账号密码登录，验证码在本页完成。登录会话短期保留，退出或服务重启后需要重新登录。</p>
       </div>
       {!session ? (
-        <EnglishLogin onConnected={connected} />
+        <EnglishLogin fixedPlatform={platform} onConnected={connected} />
       ) : (
         <div className="space-y-4 rounded-xl border border-border p-5">
           <label className="block">课程

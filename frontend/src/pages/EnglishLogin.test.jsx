@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import EnglishLearning from './EnglishLearning'
+import EnglishLogin from './EnglishLogin'
 
 const mocks = vi.hoisted(() => ({ api: vi.fn() }))
 vi.mock('../utils/api', () => ({ api: mocks.api }))
@@ -17,6 +18,24 @@ beforeEach(() => {
   })
 })
 afterEach(cleanup)
+
+test('dedicated WE Learn login fixes platform and does not adopt another platforms pending login', async () => {
+  const user = userEvent.setup()
+  const accepted = vi.fn()
+  mocks.api.mockImplementation(async (path, options) => options?.method === 'POST'
+    ? { ...connected, session: { ...connected.session, platform: 'welearn' } }
+    : { logins: [{ ...verify, platform: 'unipus_ai' }] })
+  render(<EnglishLogin fixedPlatform="welearn" onConnected={accepted} />)
+  await waitFor(() => expect(mocks.api).toHaveBeenCalledWith('/english-learning/logins'))
+  expect(screen.queryByLabelText('平台')).not.toBeInTheDocument()
+  expect(screen.queryByLabelText('平台登录验证')).not.toBeInTheDocument()
+  await user.type(screen.getByLabelText('账号'), 'account')
+  await user.type(screen.getByLabelText('密码'), 'private-password')
+  await user.click(screen.getByRole('button', { name: '登录并读取课程' }))
+  await waitFor(() => expect(accepted).toHaveBeenCalledWith(expect.objectContaining({ platform: 'welearn' })))
+  const request = mocks.api.mock.calls.find(([, o]) => o?.method === 'POST')
+  expect(JSON.parse(request[1].body).platform).toBe('welearn')
+})
 
 async function login(user, platform = 'welearn') {
   await user.selectOptions(screen.getByLabelText('平台'), platform)

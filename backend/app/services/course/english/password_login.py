@@ -63,7 +63,7 @@ class PasswordLogins:
     def list(self, owner):
         self.cleanup()
         with self.lock:
-            return [dict(j['public']) for j in self.jobs.values()
+            return [{'platform': j['platform'], **j['public']} for j in self.jobs.values()
                     if j['owner'] == owner and j['process'] is not None]
 
     def _close(self, job):
@@ -111,14 +111,14 @@ class PasswordLogins:
         if not acquired:
             if command is not None:
                 raise PlatformError('正在处理上一步操作，请稍候')
-            return dict(job['public'])
+            return {'platform': job['platform'], **job['public']}
         failure_code = None
         try:
             with self.lock:
                 self._job(owner, lid)
                 process = job['process']
                 if process is None:
-                    return dict(job['public'])
+                    return {'platform': job['platform'], **job['public']}
             # A slow OAuth callback can outlive one HTTP poll. Keep one
             # outstanding worker command; never enqueue duplicate actions.
             if not job.get('awaiting_reply'):
@@ -148,7 +148,7 @@ class PasswordLogins:
                                      'qr_status': result.get('qr_status') if result.get('qr_status') in ('waiting', 'scanned', 'expired') else None}
                 else:
                     raise PlatformError('登录页面返回异常，请重新登录')
-                return dict(job['public'])
+                return {'platform': job['platform'], **job['public']}
         except Exception as exc:
             if (isinstance(exc, PlatformError) and str(exc) == '登录页面未能正常响应，请重新登录'
                     and job['process'] is process and process.poll() is None
@@ -157,7 +157,7 @@ class PasswordLogins:
                     job['public'] = {'login_id': lid, 'status': 'verification', 'image': '',
                                      'view_state': 'loading', 'display_mode': 'page',
                                      'message': '正在等待平台官网完成登录跳转，请稍候；可以取消登录。'}
-                return dict(job['public'])
+                return {'platform': job['platform'], **job['public']}
             if failure_code is None:
                 failure_code = ('worker_response_timeout' if isinstance(exc, PlatformError)
                                 and str(exc) == '登录页面未能正常响应，请重新登录' else 'login_failed')
@@ -172,7 +172,7 @@ class PasswordLogins:
                                  'error_code': failure_code if failure_code in reasons else 'login_failed',
                                  'message': reasons.get(failure_code, ('微信授权未完成，请重新获取二维码；若重复失败请反馈此提示' if job['method'] == 'wechat'
                                              else '登录未完成，请检查账号密码或官网验证后重试'))}
-            return dict(job['public'])
+            return {'platform': job['platform'], **job['public']}
         finally:
             job['io'].release()
 

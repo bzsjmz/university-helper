@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.v1 import auth, chaoxing, learning_accounts, english_learning
+from app.api.v1 import welearn
 from app.api.v1.course import cancel_all_qr_sessions, cleanup_expired_entries
 from app.api.v1.metrics import record_request
 from app.api.v1.metrics import router as metrics_router
@@ -147,6 +148,7 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        await asyncio.to_thread(welearn.welearn_workbench.shutdown)
         await asyncio.to_thread(english_learning.english_manager.shutdown)
         bootstrap_stop.set()
         await _cancel_task(getattr(app.state, "auto_restart_task", None))
@@ -341,6 +343,7 @@ app.include_router(course.router, prefix="/api/v1/course", tags=["course"])
 app.include_router(chaoxing.router, prefix="/api/v1/chaoxing", tags=["chaoxing"])
 app.include_router(learning_accounts.router, prefix="/api/v1/learning-accounts", tags=["learning-accounts"])
 app.include_router(english_learning.router, prefix="/api/v1/english-learning", tags=["english-learning"])
+app.include_router(welearn.router, prefix="/api/v1/welearn", tags=["welearn"])
 app.include_router(metrics_router, tags=["metrics"])
 
 if settings.PROFILE != "local":
