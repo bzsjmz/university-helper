@@ -7,7 +7,7 @@ on:
     inputs:
       version:
         description: 'Desktop preview version (X.Y.Z or X.Y.Z-beta.N)'
-        default: '1.6.0-beta.7'
+        default: '1.6.0-beta.8'
         required: true
 
 permissions:
@@ -48,6 +48,8 @@ jobs:
           tests/unit/test_english_learning.py tests/unit/test_english_password_login.py
           tests/unit/test_english_answering.py tests/unit/test_ai_server_config.py
           tests/unit/test_welearn_workbench.py tests/unit/test_welearn_content_wait.py tests/unit/test_welearn_ai_pacing.py
+          tests/unit/test_chapter_diagnostics.py tests/unit/test_chaoxing_learning_retry.py
+          tests/unit/test_chaoxing_learning_chapter_limits.py tests/unit/test_course_assessments.py
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '20'
