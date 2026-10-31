@@ -181,7 +181,7 @@ class EnglishManager:
         return self.adopt_login(owner, platform, {'credential': credential, **result}, course)
 
     def adopt_login(self, owner, platform, result, course=''):
-        credential = result['credential']
+        credential = result.get('_credential', result['credential'])
         courses = result['courses']
         if platform == 'unipus_ai':
             storage_state(credential)
@@ -223,7 +223,10 @@ class EnglishManager:
         try:
             result = self.execute({'platform': session['platform'], 'credential': decrypt_str(session['credential']),
                                    'course': course, 'action': 'items'})
+            credential = result.pop('_credential', None)
             with self.lock:
+                if credential is not None:
+                    session['credential'] = encrypt_str(credential)
                 session['items'][course] = result['items']
             return result
         finally:

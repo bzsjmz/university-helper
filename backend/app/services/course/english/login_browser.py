@@ -81,12 +81,13 @@ def authenticated_result(context, page, platform):
         if parsed.hostname != 'welearn.sflep.com' or not parsed.path.startswith('/student/'):
             return None
         cookies = context.cookies(['https://welearn.sflep.com'])
-        credential = '; '.join(c['name'] + '=' + c['value'] for c in cookies)
-        if not credential:
+        if not cookies:
             return None
+        credential = json.dumps({'welearn_session': 1, 'cookies': cookies})
         client = Welearn(credential)
         try:
             courses = client.courses()
+            credential = client.export_credential()
         except (PlatformError, requests.RequestException):
             return None
         finally:

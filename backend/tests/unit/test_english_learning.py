@@ -92,6 +92,18 @@ def test_sessions_and_tasks_are_owner_scoped_without_credentials(manager):
     assert manager.list('bob') == []
 
 
+def test_temporary_session_retains_rotation_without_returning_it(manager):
+    manager.execute.return_value['_credential'] = 'sid=connected'
+    result = manager.connect('alice', 'welearn', 'sid=original')
+    sid = result['session_id']
+    assert manager.sessions[sid]['credential'] == 'encrypted:sid=connected'
+    assert '_credential' not in result
+    manager.execute.return_value['_credential'] = 'sid=items-renewed'
+    result = manager.items('alice', sid, 'c')
+    assert '_credential' not in result
+    assert manager.sessions[sid]['credential'] == 'encrypted:sid=items-renewed'
+
+
 def test_must_read_course_and_choose_actual_item_before_start(manager):
     sid = manager.connect('alice', 'welearn', 'sid=private')['session_id']
     with pytest.raises(PlatformError):

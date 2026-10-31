@@ -44,6 +44,8 @@ def main():
                             request['seconds'], ask_parent, submit=request.get('submit', False))
                 else:
                     result = client.study(request['course'], request['item'], request['seconds'])
+                if action in ('account', 'connect', 'items'):
+                    result['_credential'] = client.export_credential()
             finally:
                 client.session.close()
         else:

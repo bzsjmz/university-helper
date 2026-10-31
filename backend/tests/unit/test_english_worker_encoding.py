@@ -28,6 +28,8 @@ class Welearn:
         return None, [{'id': 'lesson1', 'name': '第一单元 阅读'}]
     def study(self, *args):
         return {'message': '课节读取完成'}
+    def export_credential(self):
+        return 'sid=encoding-fixture'
 def answer(credential, course, item, seconds, solve, **kwargs):
     reply = solve({'title': '请选择正确答案', 'options': ['正确', '错误']})
     return {'message': '处理完成', 'answer': reply['answer']}
@@ -62,6 +64,8 @@ def test_parent_reads_chinese_worker_results_under_system_code_page(encoding, ac
         }, None)
         value = result[field][0]['name'] if isinstance(result[field], list) else result[field]
         assert value == text
+        if action in ('connect', 'items'):
+            assert result['_credential'] == 'sid=encoding-fixture'
         assert process.returncode == 0
     finally:
         if process.poll() is None:

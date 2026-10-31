@@ -69,9 +69,10 @@ function AccountPanel({ account, checked, onChecked, onPlan, onLogin, onRefresh,
   return <article className="space-y-4 rounded-2xl border border-border bg-surface p-5" aria-label={`账号 ${account.label}`}>
     <div className="flex flex-wrap items-center gap-3">
       <label className="flex flex-1 items-center gap-3 font-semibold"><input type="checkbox" checked={checked} disabled={busy} onChange={e => onChecked(account.id, e.target.checked)} />{account.label}</label>
-      <span className="text-xs text-text-muted">{account.busy ? '账号忙碌' : '登录已保存'}</span>
+      <span className="text-xs text-text-muted">{account.busy ? '账号忙碌' : '登录凭据已保存'}</span>
       <button className={button} disabled={busy} onClick={() => onLogin(account)}>更新登录</button>
     </div>
+    <p className="text-xs text-text-muted">登录信息已加密保存，重开后可继续使用；平台会话过期或被撤销时仍需更新登录。</p>
     <div className="flex flex-wrap gap-2">
       <button className={button} disabled={busy} onClick={readCourses}>读取课程</button>
       <button className={button} disabled={busy} onClick={allCourses}>全选全部课程与课节</button>

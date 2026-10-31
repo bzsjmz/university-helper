@@ -78,6 +78,7 @@ class WelearnWorkbench:
             credential = decrypt_str(session['credential'])
         try:
             identity = self.engine.execute({'platform': 'welearn', 'action': 'account', 'credential': credential})
+            credential = identity.pop('_credential', credential)
             key = account_fingerprint('welearn:' + identity['uid'])
             with self.lock:
                 if key in self.busy or self.closing:
@@ -105,10 +106,16 @@ class WelearnWorkbench:
         with self.reserve(owner, aid) as row:
             result = self.engine.execute({'platform': 'welearn', 'action': 'connect',
                                           'credential': decrypt_str(row['credential_ciphertext'])})
+            self.refresh_credential(owner, row, result)
             with self.lock:
                 cache = self.catalogs.setdefault((str(owner), aid), {'items': {}})
                 cache['courses'] = copy.deepcopy(result['courses'])
             return result
+
+    def refresh_credential(self, owner, row, result):
+        credential = result.pop('_credential', None)
+        if credential is not None:
+            self.store.update_credential(owner, row['id'], credential, row['credential_ciphertext'])
 
     def items(self, owner, aid, course):
         with self.reserve(owner, aid) as row:
@@ -118,6 +125,7 @@ class WelearnWorkbench:
                     raise PlatformError('请先读取该账号的课程')
             result = self.engine.execute({'platform': 'welearn', 'action': 'items', 'course': course,
                                           'credential': decrypt_str(row['credential_ciphertext'])})
+            self.refresh_credential(owner, row, result)
             with self.lock:
                 cache['items'][course] = copy.deepcopy(result['items'])
             return result

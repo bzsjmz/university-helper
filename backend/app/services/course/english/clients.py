@@ -77,8 +77,41 @@ class Welearn:
         self.session.trust_env = False
         self.session.headers.update({'Referer': self.BASE + '/student/index.aspx',
                                      'User-Agent': 'Mozilla/5.0'})
+        if not isinstance(credential, str) or len(credential) > 100_000:
+            raise PlatformError('WE Learn 登录凭据格式无效，请更新登录')
         if '\n' in credential or '\r' in credential:
             raise PlatformError('Cookie 不可包含换行')
+        if credential.lstrip().startswith('{'):
+            try:
+                state = json.loads(credential)
+                if state.get('welearn_session') != 1 or not isinstance(state.get('cookies'), list):
+                    raise ValueError()
+                if not 1 <= len(state['cookies']) <= 100:
+                    raise ValueError()
+                for cookie in state['cookies']:
+                    name, value = cookie['name'], cookie['value']
+                    domain, path = cookie['domain'], cookie.get('path', '/')
+                    expires = cookie.get('expires')
+                    if (not isinstance(name, str) or not name or not isinstance(value, str)
+                            or re.search(r'[\x00-\x20\x7f;,=]', name)
+                            or re.search(r'[\x00-\x1f\x7f;]', value)
+                            or domain not in ('welearn.sflep.com', '.welearn.sflep.com', 'sflep.com', '.sflep.com')
+                            or not isinstance(path, str) or not path.startswith('/')
+                            or re.search(r'[\x00-\x20\x7f]', path)
+                            or type(cookie.get('secure', False)) is not bool
+                            or type(cookie.get('httpOnly', False)) is not bool
+                            or cookie.get('sameSite', 'Lax') not in ('Lax', 'Strict', 'None')
+                            or expires is not None and (type(expires) not in (int, float)
+                                or not -1 <= expires <= 253402300799)):
+                        raise ValueError()
+                    self.session.cookies.set(name, value, domain=domain, path=path,
+                        secure=cookie.get('secure', False),
+                        expires=int(expires) if expires is not None and expires >= 0 else None,
+                        rest={**({'HttpOnly': None} if cookie.get('httpOnly', False) else {}),
+                              **({'SameSite': cookie['sameSite']} if 'sameSite' in cookie else {})})
+                return
+            except (ValueError, TypeError, KeyError, AttributeError, OverflowError):
+                raise PlatformError('WE Learn 登录凭据格式无效，请更新登录') from None
         values = {}
         for part in credential.split(';'):
             if '=' in part:
@@ -90,14 +123,27 @@ class Welearn:
         for key, value in values.items():
             self.session.cookies.set(key, value, domain='welearn.sflep.com', path='/')
 
+    def export_credential(self):
+        cookies = [{'name': cookie.name, 'value': cookie.value, 'domain': cookie.domain,
+                    'path': cookie.path, 'expires': cookie.expires, 'secure': cookie.secure,
+                    'httpOnly': cookie.has_nonstandard_attr('HttpOnly')
+                        and cookie.get_nonstandard_attr('HttpOnly') is not False,
+                    **({'sameSite': cookie.get_nonstandard_attr('SameSite')}
+                       if cookie.get_nonstandard_attr('SameSite') in ('Lax', 'Strict', 'None') else {})}
+                   for cookie in self.session.cookies
+                   if cookie.domain in ('welearn.sflep.com', '.welearn.sflep.com', 'sflep.com', '.sflep.com')]
+        return json.dumps({'welearn_session': 1, 'cookies': cookies}, ensure_ascii=True)
+
     def request(self, path, *, data=None, params=None, html=False):
         # Fixed origin, no redirect following: credentials never follow SSO/CDN URLs.
         response = self.session.request('POST' if data is not None else 'GET',
             self.BASE + path, data=data, params=params, timeout=(10, 20),
             allow_redirects=False, stream=True)
         try:
+            if response.status_code in (301, 302, 303, 307, 308, 401, 403):
+                raise PlatformError('WE Learn 登录已失效或需要验证，请点击“更新登录”后重试')
             if response.status_code != 200:
-                raise PlatformError('平台请求失败，请检查登录会话或稍后重试')
+                raise PlatformError('WE Learn 平台请求失败，请稍后重试')
             chunks, size = [], 0
             for chunk in response.iter_content(65536):
                 size += len(chunk)
@@ -105,6 +151,9 @@ class Welearn:
                     raise PlatformError('平台返回内容过大')
                 chunks.append(chunk)
             text = b''.join(chunks).decode('utf-8-sig')
+            if re.search(r'<(?:form|input)\b', text, re.I) and re.search(
+                    r'(?:prelogin\.aspx|sso\.sflep\.com|type\s*=\s*[\'"]?password\b)', text, re.I):
+                raise PlatformError('WE Learn 登录已失效或需要验证，请点击“更新登录”后重试')
             if html:
                 return text
             payload = json.loads(text)
@@ -112,7 +161,7 @@ class Welearn:
                 raise ValueError()
             return payload
         except (ValueError, UnicodeError):
-            raise PlatformError('平台返回格式变化或登录会话已失效') from None
+            raise PlatformError('WE Learn 返回了无法识别的课程数据，请稍后重试；若仍失败，请更新登录') from None
         finally:
             response.close()
 
@@ -209,8 +258,11 @@ def unipus_browser(credential, platform='unipus_ai'):
         raise PlatformError('自动答题需要 Playwright 和 Chromium 运行环境，当前后端尚未安装') from None
     if platform == 'welearn':
         client = Welearn(credential)
-        state = {'cookies': [{'name': c.name, 'value': c.value, 'domain': c.domain,
-                             'path': c.path, 'secure': True} for c in client.session.cookies], 'origins': []}
+        cookies = json.loads(client.export_credential())['cookies']
+        for cookie in cookies:
+            if cookie['expires'] is None:
+                del cookie['expires']
+        state = {'cookies': cookies, 'origins': []}
         client.session.close()
         domain = 'sflep.com'
     else:

@@ -117,6 +117,18 @@ class WelearnStore:
             saved = cur.fetchone()['id']
         return self.account(owner, saved)
 
+    def update_credential(self, owner, aid, credential, previous):
+        cipher = encrypt_str(credential)
+        if not cipher.startswith('fernet:'):
+            raise PlatformError('保存登录需要启用凭据加密，请联系管理员')
+        with account_session() as conn:
+            cur = conn.cursor()
+            cur.execute('''UPDATE welearn_accounts SET credential_ciphertext=%s
+                WHERE owner_id=%s AND id=%s AND credential_ciphertext=%s RETURNING id''',
+                (cipher, str(owner), aid, previous))
+            if not cur.fetchone():
+                raise PlatformError('账号登录已被更新或删除，请刷新后重试')
+
     def rename(self, owner, aid, label):
         self.account(owner, aid)
         with account_session() as conn:

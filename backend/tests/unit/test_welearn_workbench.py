@@ -84,6 +84,64 @@ def test_saved_login_survives_new_manager_and_never_returns_secrets(bench):
         assert 'sid=one' not in cur.fetchone()['credential_ciphertext']
 
 
+def test_rotated_login_is_encrypted_persisted_and_hidden_from_catalog_responses(bench):
+    account = save(bench)
+    bench.engine.execute = Mock(return_value={'courses': [{'id': 'c', 'name': 'Course'}],
+                                               '_credential': 'sid=renewed'})
+    result = bench.courses('alice', account['id'])
+    assert '_credential' not in result and 'renewed' not in json.dumps(result)
+    raw = bench.store.account('alice', account['id'])
+    assert raw['credential_ciphertext'].startswith('fernet:')
+    assert credential_crypto.decrypt_str(raw['credential_ciphertext']) == 'sid=renewed'
+    assert str(raw['updated_at']) == account['updated_at']
+    bench.engine.execute = Mock(return_value={'items': [], '_credential': 'sid=renewed-again'})
+    assert bench.items('alice', account['id'], 'c') == {'items': []}
+    assert bench.engine.execute.call_args.args[0]['credential'] == 'sid=renewed'
+    restored = WelearnWorkbench(bench.engine, WelearnStore())
+    bench.engine.execute = Mock(return_value={'courses': []})
+    restored.courses('alice', account['id'])
+    assert bench.engine.execute.call_args.args[0]['credential'] == 'sid=renewed-again'
+
+
+def test_rotation_cannot_overwrite_new_login_or_cross_owner_boundary(bench):
+    account = save(bench)
+    row = bench.store.account('alice', account['id'])
+    bench.store.update_credential('alice', account['id'], 'sid=new-login', row['credential_ciphertext'])
+    for owner in ('alice', 'bob'):
+        with pytest.raises(PlatformError, match='已被更新或删除'):
+            bench.store.update_credential(owner, account['id'], 'sid=stale', row['credential_ciphertext'])
+    assert credential_crypto.decrypt_str(bench.store.account('alice', account['id'])['credential_ciphertext']) == 'sid=new-login'
+
+
+def test_failed_course_read_keeps_last_saved_login(bench):
+    account = save(bench)
+    original = bench.store.account('alice', account['id'])['credential_ciphertext']
+    bench.engine.execute = Mock(side_effect=PlatformError('登录已失效'))
+    with pytest.raises(PlatformError, match='登录已失效'):
+        bench.courses('alice', account['id'])
+    assert bench.store.account('alice', account['id'])['credential_ciphertext'] == original
+    assert bench.accounts('alice')[0]['busy'] is False
+
+
+def test_cookie_rotation_refuses_plaintext_storage(bench, monkeypatch):
+    import app.services.course.english.welearn_store as module
+    account = save(bench)
+    row = bench.store.account('alice', account['id'])
+    monkeypatch.setattr(module, 'encrypt_str', lambda value: value)
+    with pytest.raises(PlatformError, match='加密'):
+        bench.store.update_credential('alice', account['id'], 'sid=renewed', row['credential_ciphertext'])
+    assert bench.store.account('alice', account['id'])['credential_ciphertext'] == row['credential_ciphertext']
+
+
+def test_saving_login_keeps_cookie_rotation_from_identity_check(bench):
+    session = bench.engine.adopt_login('alice', 'welearn', {'credential': 'sid=old', 'courses': []})
+    bench.engine.execute = Mock(return_value={'uid': 'one', '_credential': 'sid=identity-renewed'})
+    account = bench.save_session('alice', session['session_id'])
+    row = bench.store.account('alice', account['id'])
+    assert credential_crypto.decrypt_str(row['credential_ciphertext']) == 'sid=identity-renewed'
+    assert 'identity-renewed' not in json.dumps(account)
+
+
 def test_relogin_updates_same_identity_and_rejects_wrong_account(bench):
     account = save(bench)
     assert save(bench)['id'] == account['id']
