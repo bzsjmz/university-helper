@@ -115,7 +115,7 @@ jobs:
       - name: Verify login worker pipes without accounts or network requests
         env:
           ENV: dev
-        run: python -m pytest -o addopts= -q -p no:cacheprovider tests/unit/test_desktop_processes.py
+        run: python -m pytest -o addopts= -q -p no:cacheprovider tests/unit/test_desktop_processes.py tests/unit/test_english_worker_encoding.py
 
   frontend:
     name: Frontend (lint · test · build)
