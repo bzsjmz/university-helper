@@ -47,3 +47,32 @@ test('save failure keeps the entered key for retry and shows a useful error', as
   expect(await screen.findByRole('alert')).toHaveTextContent('保存失败')
   expect(screen.getByLabelText(/优先 Key（已配置/)).toHaveValue('fixture-key')
 })
+
+test('imports a local font mapping and explains restart without changing AI settings', async () => {
+  const user = userEvent.setup()
+  api.mockImplementation(async path => path === '/desktop/font-map' ? { entries: 12, restart_required: true } : { ...initial })
+  render(<DesktopSettings />)
+  const input = await screen.findByLabelText('导入字体映射')
+  const file = new File(['{}'], 'font_map_table.json', { type: 'application/json' })
+  Object.defineProperty(file, 'text', { value: async () => '{"uni5982":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}' })
+  await user.upload(input, file)
+  expect(await screen.findByRole('status')).toHaveTextContent('已导入 12 项字体映射')
+  expect(screen.getByRole('status')).toHaveTextContent('重新打开应用')
+  expect(api.mock.calls.find(([path]) => path === '/desktop/font-map')[1].method).toBe('PUT')
+  expect(api.mock.calls.filter(([path]) => path === '/desktop/settings')).toHaveLength(1)
+})
+
+test('invalid font import keeps the previous status and shows the server validation error', async () => {
+  const user = userEvent.setup()
+  api.mockImplementation(async path => {
+    if (path === '/desktop/font-map') throw new Error('字体映射格式无效')
+    return { ...initial, font_map_entries: 12 }
+  })
+  render(<DesktopSettings />)
+  const input = await screen.findByLabelText('导入字体映射')
+  const file = new File(['bad'], 'bad.json', { type: 'application/json' })
+  Object.defineProperty(file, 'text', { value: async () => 'bad' })
+  await user.upload(input, file)
+  expect(await screen.findByRole('alert')).toHaveTextContent('字体映射格式无效')
+  expect(screen.getByText('已保存 12 项字体映射')).toBeInTheDocument()
+})

@@ -38,6 +38,21 @@ export default function DesktopSettings() {
     } catch (err) { setError(err.message || '保存失败，请重试') }
     finally { setBusy(false) }
   }
+  const importFont = async event => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file || busy) return
+    setMessage('')
+    setError('')
+    if (file.size > 4 * 1024 * 1024) { setError('字体映射文件过大（最多 4 MiB）'); return }
+    setBusy(true)
+    try {
+      const result = await api('/desktop/font-map', { method: 'PUT', body: await file.text() })
+      setSettings(value => ({ ...value, font_map_entries: result.entries }))
+      setMessage(`已导入 ${result.entries} 项字体映射。请停止任务，退出并重新打开应用后生效。`)
+    } catch (err) { setError(err.message || '字体映射导入失败') }
+    finally { setBusy(false) }
+  }
   return <div className="mx-auto max-w-2xl space-y-5">
     <h1 className="text-3xl font-bold">桌面设置</h1>
     <Card className="space-y-3">
@@ -47,6 +62,12 @@ export default function DesktopSettings() {
     </Card>
     {error && <p role="alert" className="text-danger">{error}</p>}
     {message && <p role="status" className="text-success">{message}</p>}
+    {settings && <Card className="space-y-3">
+      <h2 className="text-xl font-semibold">学习通加密测验字体</h2>
+      <p className="text-sm text-text-muted">{settings.font_map_entries ? `已保存 ${settings.font_map_entries} 项字体映射` : '尚未导入字体映射。加密测验可能无法解析，导致章节失败。'}</p>
+      <p className="text-sm text-text-muted">选择你已有的 font_map_table.json 字体映射文件。导入后需退出并重开应用；它用于还原题目文字，不提供题目答案。</p>
+      <label className="block text-sm">导入字体映射<input type="file" accept=".json,application/json" disabled={busy} onChange={importFont} className="mt-2 block w-full text-sm" /></label>
+    </Card>}
     {settings ? <Card><form onSubmit={save} className="space-y-4">
       <h2 className="text-xl font-semibold">AI 答题配置</h2>
       <p className="text-sm text-text-muted">默认顺序为本地缓存 → AI。使用 AI 需填写自己的接口、模型和 Key，可能产生费用。无需 AI 时，可在任务设置中只选本地缓存。</p>

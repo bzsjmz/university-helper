@@ -11,7 +11,7 @@ from loguru import logger
 from .answer_check import cut
 from .answer_quality import is_usable_answer, has_unanswered_text
 from .decode import decode_questions_info
-from .exceptions import MaxRetryExceeded, PaperNotOpen
+from .exceptions import FontDecodeError, MaxRetryExceeded, PaperNotOpen
 from .constants import StudyResult
 from . import query_control as control
 
@@ -340,6 +340,10 @@ class ChaoxingQuizService:
         except PaperNotOpen:
             logger.info('章节测验尚未开放或已截止，跳过答题')
             return StudyResult.NOT_OPEN
+        except (FontDecodeError, control.QueryControlError):
+            # Preserve the actionable category for the task UI; never turn
+            # encrypted/unreadable questions into guessed or random answers.
+            raise
         except Exception as e:
             logger.error(f"请求失败: {e}")
             return False

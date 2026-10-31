@@ -3,6 +3,8 @@ import requests
 
 def diagnostic_reason(exc):
     """Safe task-facing reason: exception text can contain URLs and credentials."""
+    if isinstance(exc, FontDecodeError):
+        return "加密题目字体解码失败，可能缺少字体映射或映射不完整（桌面版可在桌面设置导入后重开应用）"
     if isinstance(exc, requests.Timeout):
         return "网络请求超时"
     if isinstance(exc, requests.ConnectionError):

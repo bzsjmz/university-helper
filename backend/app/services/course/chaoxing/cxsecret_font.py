@@ -34,11 +34,12 @@ def resource_path(relative_path: str) -> str:
     获取资源文件的路径，兼容PyInstaller打包后的环境。
 
     解析顺序（返回第一个真实存在的候选，否则回退到稳定的 backend 根目录候选）：
-      1. PyInstaller 临时目录 (sys._MEIPASS)
-      2. backend 根目录（由本文件位置推导，与进程 CWD 无关）—— 生产环境
+      1. 桌面用户导入目录（仅字体映射，UH_DESKTOP_DATA/resource/）
+      2. PyInstaller 临时目录 (sys._MEIPASS)
+      3. backend 根目录（由本文件位置推导，与进程 CWD 无关）—— 生产环境
          uvicorn 的 CWD 不一定是 backend，旧实现用 os.path.abspath(".")
          会解析到错误目录导致即便已放置 resource/ 也找不到。(audit F14)
-      3. 进程当前工作目录
+      4. 进程当前工作目录
 
     Args:
         relative_path: 相对路径
@@ -47,6 +48,11 @@ def resource_path(relative_path: str) -> str:
         资源文件的绝对路径
     """
     candidates = []
+    # User-supplied desktop resources live outside PyInstaller's temporary
+    # extraction directory and are never bundled from the server's data.
+    desktop_data = os.environ.get("UH_DESKTOP_DATA", "").strip()
+    if relative_path == "resource/font_map_table.json" and desktop_data:
+        candidates.append(str(Path(desktop_data) / relative_path))
     meipass = getattr(sys, "_MEIPASS", None)
     if meipass:
         candidates.append(os.path.join(meipass, relative_path))

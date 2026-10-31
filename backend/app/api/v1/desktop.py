@@ -6,7 +6,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, SecretStr
 
-from app.desktop_settings import LOCK, apply_settings, private_write, public_settings
+from app.desktop_settings import FONT_MAP_LIMIT, LOCK, apply_settings, private_write, public_settings, validate_font_map
 from app.services.course.chaoxing.endpoint_security import assert_public_endpoint, UnsafeEndpointError
 
 router = APIRouter()
@@ -29,6 +29,26 @@ def directory():
 @router.get('/settings')
 def get_settings():
     return public_settings(directory())
+
+
+@router.put('/font-map')
+async def import_font_map(request: Request):
+    if request.headers.get('origin') != str(request.base_url).rstrip('/'):
+        raise HTTPException(403, '仅允许在本机应用中导入字体映射')
+    raw = bytearray()
+    async for chunk in request.stream():
+        if len(raw) + len(chunk) > FONT_MAP_LIMIT:
+            raise HTTPException(413, '字体映射文件过大（最多 4 MiB）')
+        raw.extend(chunk)
+    try:
+        data = validate_font_map(raw)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
+    with LOCK:
+        target = directory() / 'resource'
+        target.mkdir(mode=0o700, exist_ok=True)
+        private_write(target / 'font_map_table.json', json.dumps(data, separators=(',', ':')))
+    return {'entries': len(data), 'restart_required': True}
 
 
 @router.put('/settings')

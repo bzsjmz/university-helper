@@ -1,12 +1,29 @@
 """Private, per-user desktop configuration. Never imports server settings."""
 import json
 import os
+import re
 import tempfile
 import threading
 from pathlib import Path
 
 LOCK = threading.RLock()
 DEFAULT_ENDPOINT = 'https://api.deepseek.com/chat/completions'
+FONT_MAP_LIMIT = 4 * 1024 * 1024
+
+
+def validate_font_map(raw):
+    if len(raw) > FONT_MAP_LIMIT:
+        raise ValueError('字体映射文件过大（最多 4 MiB）')
+    try:
+        data = json.loads(raw)
+    except (ValueError, UnicodeError):
+        raise ValueError('请选择有效的字体映射 JSON 文件') from None
+    if (not isinstance(data, dict) or not 1 <= len(data) <= 100000 or
+            any(not isinstance(k, str) or not re.fullmatch(r'uni[0-9A-F]{4,6}', k)
+                or int(k[3:], 16) > 0x10ffff or not isinstance(v, str)
+                or not re.fullmatch('[0-9a-f]{32}', v) for k, v in data.items())):
+        raise ValueError('字体映射格式无效，需要 Unicode 字形与哈希的对应表')
+    return data
 
 
 def private_write(path, value):
@@ -48,6 +65,13 @@ def apply_settings(directory):
 def public_settings(directory):
     with LOCK:
         directory = Path(directory)
-        return {**read_settings(directory), **{
+        font_file = directory / 'resource' / 'font_map_table.json'
+        font_entries = 0
+        try:
+            if font_file.is_file() and font_file.stat().st_size <= FONT_MAP_LIMIT:
+                font_entries = len(validate_font_map(font_file.read_bytes()))
+        except (ValueError, OSError):
+            pass
+        return {**read_settings(directory), 'font_map_entries': font_entries, **{
             role + '_configured': (directory / name).exists() and bool((directory / name).read_text().strip())
             for role, name in (('primary', 'ai-primary.key'), ('fallback', 'ai-fallback.key'))}}
