@@ -29,6 +29,7 @@ PATHS = {
     "/exam-ans/exam/test/reVersionSubmitTestNew", "/mooc-ans/mooc2/work/task",
     "/mooc-ans/mooc2/work/dowork", "/mooc-ans/work/doHomeWorkNew",
     "/mooc-ans/work/addStudentWorkNew",
+    "/work/phone/gotoWorkAnswerSheet", "/mooc-ans/work/phone/gotoWorkAnswerSheet",
 }
 TYPES = {"0": "single", "1": "multiple", "2": "completion", "3": "judgement",
          "4": "shortanswer", "6": "shortanswer", "7": "shortanswer"}
@@ -115,9 +116,10 @@ def parse_list(html, base, kind, course):
         text = row.get_text(' ', strip=True)
         completed = any(token in status for token in ('已交', '已提交', '已完成', '已批', '待批', '待互', '已互'))
         unavailable = any(token in text for token in ('未开始', '已结束', '已过期', '已截止', '待重做', '重考'))
-        pending = any(token in status for token in ('未交', '未提交', '待完成', '待考试', '未考', '进行中'))
+        pending = any(token in status for token in ('未交', '未提交', '待完成', '待考试', '未考', '进行中', '待做'))
         items.append({'id': identifier, 'kind': kind, 'url': url,
                       'title': title.get_text(' ', strip=True) if title else f'{kind} {identifier}',
+                      'submitted': completed, 'unavailable': unavailable,
                       'skip': completed or unavailable, 'pending': pending and not completed and not unavailable})
     if not rows and not any(token in soup.get_text() for token in ('暂无', '没有作业', '没有考试', '无作业', '无考试')):
         raise AssessmentUnavailable("无法识别列表，未将其当作空列表")
@@ -318,13 +320,32 @@ class CourseAssessmentService:
 
     def open_paper(self, item, course):
         entry = urlsplit(item['url'])
-        if entry.path in ('/mooc-ans/work/phone/task-work', '/exam-ans/exam/phone/task-exam'):
+        revising = item.get('_revise') is True and item['kind'] == 'homework'
+        if not revising and entry.path in ('/mooc-ans/work/phone/task-work', '/exam-ans/exam/phone/task-exam'):
             entry = entry._replace(path='/android/mtaskmsgspecial' if item['kind'] == 'homework' else '/exam-ans/android/mtaskmsgspecial')
         html, url = self.get(entry.geturl())
         soup = BeautifulSoup(html, 'lxml')
         check_page(soup)
         count_match = re.search(r'共(?:包含)?\s*(\d+)\s*(?:道题目|道题|题)', soup.get_text())
         expected_count = int(count_match[1]) if count_match else None
+        if revising:
+            # Follow the platform's existing edit link, never the destructive
+            # /redo endpoint. Server access checks still apply to the form.
+            jump = re.search(r'function\s+jump\s*\([^)]*\)\s*\{(.*?)\}', html, re.S)
+            links = re.findall(r'["\']([^"\']*(?:/work/phone/doHomeWork)[^"\']*)["\']', jump[1] if jump else '')
+            if not links:
+                raise AssessmentUnavailable('平台未提供作业修改入口')
+            target = safe_url(links[0].replace('&amp;', '&'), url)
+            values = {key: values[0] for key, values in parse_qs(urlsplit(target).query).items()}
+            assert_scope(values, course)
+            if values.get('workId') != item['id']:
+                raise AssessmentUnavailable('作业修改入口编号与列表不一致')
+            html, url = self.get(target)
+            edit = BeautifulSoup(html, 'lxml')
+            check_page(edit)
+            if not edit.select_one('form [name^="answer"]'):
+                raise AssessmentUnavailable('平台未开放可编辑的作业表单')
+            return self.parse_open_paper(html, url, item['kind'], course, expected_count)
         if not soup.select_one('.singleQuesId, .questionWrap'):
             data = fields(soup)
             assert_scope(data, course)
@@ -341,14 +362,41 @@ class CourseAssessmentService:
                     target = safe_url(links[0].replace('&amp;', '&'), url)
                     assert_scope({key: values[0] for key, values in parse_qs(urlsplit(target).query).items()}, course)
                     html, url = self.get(target)
-                    return parse_paper(html, url, item['kind'], course, expected_count)
+                    return self.parse_open_paper(html, url, item['kind'], course, expected_count)
                 params = {'workId': item['id'], 'workAnswerId': data.get('workRelationAnswerId', ''),
                           'enc': data.get('enc', ''), 'mooc': '1', 'source': '0', 'msgId': '0'}
                 if not params['enc']:
                     raise AssessmentUnavailable("作业入口缺少访问参数")
             params.update(courseId=course['courseId'], classId=course['clazzId'], cpi=course['cpi'])
             html, url = self.get(HOST + path + '?' + urlencode(params))
-        return parse_paper(html, url, item['kind'], course, expected_count)
+        return self.parse_open_paper(html, url, item['kind'], course, expected_count)
+
+    def parse_open_paper(self, html, url, kind, course, expected_count=None):
+        soup = BeautifulSoup(html, 'lxml')
+        check_page(soup)
+        if (kind == 'homework' and '/phone/' in url and not expected_count and
+                not soup.select_one('input#questionCount, input#totalQuestionNum, input#totalQuestionCount') and
+                not re.search(r'共(?:包含)?\s*\d+\s*(?:道题目|道题|题)', soup.get_text())):
+            # Some native edit forms contain only the current question. Read
+            # the platform answer sheet before generating or saving anything.
+            data = fields(soup)
+            assert_scope(data, course)
+            required = ('workRelationId', 'workRelationAnswerId', 'enc')
+            if any(not data.get(key) for key in required):
+                raise AssessmentUnavailable('缺少作业答题卡参数')
+            params = {key: data.get(key, '') for key in
+                      ('workRelationId', 'workRelationAnswerId', 'knowledgeid', 'enc', 'encWork')}
+            params.update(courseId=course['courseId'], classId=course['clazzId'], cpi=course['cpi'],
+                          source='0', mooc='1', lastIndex=data.get('index', '0'))
+            path = ('/mooc-ans' if urlsplit(url).path.startswith('/mooc-ans/') else '') + '/work/phone/gotoWorkAnswerSheet'
+            sheet_html, _ = self.get(safe_url(path, url) + '?' + urlencode(params))
+            sheet = BeautifulSoup(sheet_html, 'lxml')
+            check_page(sheet)
+            numbers = [node.get_text(strip=True) for node in sheet.select('.circleItem[data]')]
+            if not numbers or len(numbers) > 500 or numbers != [str(i) for i in range(1, len(numbers) + 1)]:
+                raise AssessmentUnavailable('无法从作业答题卡确认完整题数')
+            expected_count = len(numbers)
+        return parse_paper(html, url, kind, course, expected_count)
 
     def paper_pages(self, first, kind, course):
         pages = [first]
@@ -433,8 +481,10 @@ class CourseAssessmentService:
         if response.status_code != 200 or not isinstance(result, dict) or result.get('status') not in (True, 1, 'true'):
             raise AssessmentUnavailable("平台未确认保存或提交成功，请人工核对")
 
-    def run(self, course, *, homework=False, exams=False, homework_titles=None,
+    def run(self, course, *, homework=False, exams=False, homework_titles=None, revise_homework=False,
             checkpoint=lambda: None, report=lambda *args: None):
+        if type(revise_homework) is not bool:
+            raise ValueError('Homework revision flag must be a boolean')
         if homework_titles is not None and (not isinstance(homework_titles, list) or
                 any(not isinstance(title, str) or not title.strip() for title in homework_titles)):
             raise ValueError('Homework selection must be a list of nonempty titles')
@@ -465,10 +515,11 @@ class CourseAssessmentService:
                 if kind == 'homework' and selected_titles is not None and item['title'] not in selected_titles:
                     summary['skipped'] += 1
                     continue
-                if item['skip']:
+                revising = kind == 'homework' and revise_homework and item.get('submitted') and not item.get('unavailable')
+                if item['skip'] and not revising:
                     summary['skipped'] += 1
                     continue
-                if not item['pending']:
+                if not item['pending'] and not revising:
                     summary['failed'] += 1
                     report(f'{label}：状态无法确认，未进入试卷', 'warning')
                     continue
@@ -477,7 +528,7 @@ class CourseAssessmentService:
                         raise AssessmentUnavailable("未启用题库")
                     with control.job_scope(checkpoint, answering=True):
                         report(f'开始处理{label}：{item["title"]}', 'info')
-                        first = self.open_paper(item, course)
+                        first = self.open_paper({**item, '_revise': True} if revising else item, course)
                         identity_key = 'testPaperId' if kind == 'exam' else 'workRelationId'
                         if first['data'].get(identity_key) != item['id']:
                             raise AssessmentUnavailable('试卷编号与列表不一致')
@@ -498,6 +549,8 @@ class CourseAssessmentService:
                         # Course assessments never inherit the chapter retry
                         # override that permits submitting random answers.
                         final = self.tiku.get_submit_params() != '1' and found == total and found / total >= self.tiku.COVER_RATE
+                        if revising and not final:
+                            raise AssessmentUnavailable('修改作业未取得全部有效答案，保留原提交')
                         for index, page in enumerate(pages):
                             checkpoint()
                             if kind == 'exam':

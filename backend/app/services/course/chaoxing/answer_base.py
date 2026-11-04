@@ -1,6 +1,7 @@
 import configparser
 import os
 import random
+from contextlib import nullcontext
 from re import sub
 
 from loguru import logger
@@ -154,11 +155,11 @@ class Tiku:
 
         # 先过缓存。CacheDAO 现在共享进程级内存快照并在 add_cache 时写穿到磁盘，
         # 因此每题构造一个新实例的代价是 O(1)（不再每题重新读取/解析整个文件）。
-        cache_dao = CacheDAO()
-        with cache_dao.question_lock(q_info, self._conf or self.name) as flight:
+        cache_dao = None if self._bypass_local_answers else CacheDAO()
+        with (cache_dao.question_lock(q_info, self._conf or self.name) if cache_dao else nullcontext({})) as flight:
             if flight.get("miss"):
                 return None
-            answer = cache_dao.get_question_cache(q_info)
+            answer = cache_dao.get_question_cache(q_info) if cache_dao else None
             if answer:
                 logger.info(f"从缓存中获取答案：{q_info['title']} -> {answer}")
                 return answer.strip()
@@ -184,13 +185,16 @@ class Tiku:
                             logger.info(f"从{self.name}获取到的判断题答案无法归一化为 正确/错误，已舍弃：{answer}")
                             flight["miss"] = True
                             return None
-                        cache_dao.add_question_cache(q_info, normalized)
+                        if cache_dao:
+                            cache_dao.add_question_cache(q_info, normalized)
                         return normalized
-                    cache_dao.add_question_cache(q_info, answer)
+                    if cache_dao:
+                        cache_dao.add_question_cache(q_info, answer)
                     return answer
 
                 if self._accept_bank_answer(answer, q_info):
-                    cache_dao.add_question_cache(q_info, answer)
+                    if cache_dao:
+                        cache_dao.add_question_cache(q_info, answer)
                     return answer
                 logger.info(f"从{self.name}获取到的答案类型与题目类型不符，已舍弃")
                 flight["miss"] = True
@@ -310,7 +314,13 @@ class Tiku:
         fallback.config_set(self._conf)
         return fallback
 
+    @property
+    def _bypass_local_answers(self):
+        return bool(self._conf and self._conf.get('bypass_local_answers') is True)
+
     def _query_local_bank(self, q_info):
+        if self._bypass_local_answers:
+            return None
         answer = lookup_local_question_bank(q_info)
         if q_info.get('type') == 'judgement' and answer is not None:
             values = self.true_list if answer == '正确' else self.false_list
@@ -396,11 +406,11 @@ class TikuFallback(Tiku):
         q_info["title"] = sub(r"^\d+", "", q_info["title"])
         q_info["title"] = sub(r"（\d+\.\d+分）$", "", q_info["title"])
 
-        cache_dao = CacheDAO()
-        with cache_dao.question_lock(q_info, self._conf or self.name) as flight:
+        cache_dao = None if self._bypass_local_answers else CacheDAO()
+        with (cache_dao.question_lock(q_info, self._conf or self.name) if cache_dao else nullcontext({})) as flight:
             if flight.get("miss"):
                 return None
-            cached = cache_dao.get_question_cache(q_info)
+            cached = cache_dao.get_question_cache(q_info) if cache_dao else None
             if cached:
                 logger.info(f"从缓存中获取答案：{q_info['title']} -> {cached}")
                 return cached.strip()
@@ -409,7 +419,8 @@ class TikuFallback(Tiku):
             if is_usable_answer(answer):
                 answer = answer.strip()
                 logger.info(f"从{self.name}获取答案：{q_info['title']} -> {answer}")
-                cache_dao.add_question_cache(q_info, answer)
+                if cache_dao:
+                    cache_dao.add_question_cache(q_info, answer)
                 return answer
             logger.error(f"从{self.name}获取答案失败：{q_info['title']}")
             flight["miss"] = True

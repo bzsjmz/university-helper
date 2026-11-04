@@ -186,7 +186,7 @@ class ChaoxingLearningManager:
         # detail-free exception to a 4xx response; direct callers get the same
         # fail-closed behavior.
         validate_tiku_config((payload or {}).get("tiku_config"))
-        for key in ("learn_chapters", "course_homework", "course_exams"):
+        for key in ("learn_chapters", "course_homework", "course_exams", "revise_homework"):
             if key in (payload or {}) and type(payload[key]) is not bool:
                 raise ValueError("Task scope flags must be booleans")
         if not any((payload or {}).get(key, default) is True for key, default in
@@ -771,6 +771,7 @@ class ChaoxingLearningManager:
                         course, homework=payload.get("course_homework", False),
                         exams=payload.get("course_exams", False),
                         homework_titles=payload.get("course_homework_titles"),
+                        revise_homework=payload.get("revise_homework", False),
                         checkpoint=assessment_checkpoint, report=assessment_report)
                     for key, value in summary.items():
                         self._increase_progress(task_id, "assessments_" + key, value)

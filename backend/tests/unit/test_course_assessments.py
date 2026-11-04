@@ -163,6 +163,92 @@ def test_completed_unopened_and_retake_papers_are_never_entered(service, status)
     service.session.post.assert_not_called()
 
 
+def test_native_pending_exam_status_is_processed(service):
+    service.get = Mock(side_effect=[(list_page('exam', '待做'), ca.HOST),
+                                    (paper('exam'), EXAM_URL), (paper('exam'), EXAM_URL)])
+    assert service.run(COURSE, exams=True)['submitted'] == 1
+
+
+def revision_entry(target=None):
+    target = target or WORK_URL
+    return '<span onclick="jump()">修改答案</span><script>function jump(){var url="' + target + '";}</script>'
+
+
+def editable_paper():
+    return paper(extra='<input type="radio" name="answer10" value="A">')
+
+
+def test_opt_in_revision_uses_native_edit_link_and_preserves_default_skip(service):
+    service.get = Mock(side_effect=[(list_page(status='待批阅'), ca.HOST),
+                                    (revision_entry(), WORK_URL), (editable_paper(), WORK_URL)])
+    result = service.run(COURSE, homework=True, revise_homework=True)
+    assert result['submitted'] == 1
+    assert service.session.post.call_count == 1
+    assert not any('/redo' in call.args[0] for call in service.get.call_args_list)
+
+
+@pytest.mark.parametrize('target', [
+    'https://evil.example/work/phone/doHomeWork?workId=9',
+    WORK_URL.replace('classId=200', 'classId=201'),
+    WORK_URL.replace('workId=9', 'workId=99'),
+])
+def test_revision_refuses_foreign_form_before_request_or_submit(service, target):
+    service.get = Mock(side_effect=[(list_page(status='待批阅'), ca.HOST),
+                                    (revision_entry(target), WORK_URL)])
+    assert service.run(COURSE, homework=True, revise_homework=True)['failed'] == 1
+    assert service.get.call_count == 2
+    service.session.post.assert_not_called()
+
+
+def test_revision_with_unusable_answer_leaves_previous_submission_untouched(service):
+    service.tiku.query.return_value = None
+    service.get = Mock(side_effect=[(list_page(status='待批阅'), ca.HOST),
+                                    (revision_entry(), WORK_URL), (editable_paper(), WORK_URL)])
+    assert service.run(COURSE, homework=True, revise_homework=True)['failed'] == 1
+    service.session.post.assert_not_called()
+
+
+def test_revision_flag_does_not_retake_completed_exams(service):
+    service.get = Mock(return_value=(list_page('exam', '已完成'), ca.HOST))
+    assert service.run(COURSE, exams=True, revise_homework=True)['skipped'] == 1
+    assert service.get.call_count == 1
+    service.session.post.assert_not_called()
+
+
+def test_saved_task_retains_explicit_revision_scope():
+    request = AccountTask(course_ids=['100'], course_homework=True, revise_homework=True)
+    assert request.model_dump()['revise_homework'] is True
+
+
+def test_native_edit_form_uses_answer_sheet_to_check_all_pages(service):
+    first = editable_paper().replace(hidden(questionCount=1), '')
+    first = first.replace(hidden(questionCount='1'), '')
+    # Remove only the count field; the platform form has relation fields.
+    first = first.replace('name="questionCount" id="questionCount" value="1"', 'name="unused" value="1"')
+    first = first.replace('</form>', hidden(enc='synthetic') + '</form>')
+    sheet = '<span class="circleItem" data="10">1</span><span class="circleItem" data="11">2</span>'
+    service.get = Mock(side_effect=[(revision_entry(), WORK_URL), (first, WORK_URL),
+                                    (sheet, WORK_URL), (paper(qid='11', count=2), WORK_URL)])
+    item = {'url': WORK_URL, 'kind': 'homework', 'id': '9', '_revise': True}
+    initial = service.open_paper(item, COURSE)
+    assert initial['count'] == 2
+    pages = service.paper_pages(initial, 'homework', COURSE)
+    assert [p['questions'][0]['id'] for p in pages] == ['10', '11']
+    assert '/work/phone/gotoWorkAnswerSheet?' in service.get.call_args_list[2].args[0]
+    service.session.post.assert_not_called()
+
+
+@pytest.mark.parametrize('numbers', [[], ['1', '3'], ['1', '1']])
+def test_missing_or_incomplete_answer_sheet_never_guesses_single_question(service, numbers):
+    first = editable_paper().replace('name="questionCount" id="questionCount" value="1"', 'name="unused" value="1"')
+    first = first.replace('</form>', hidden(enc='synthetic') + '</form>')
+    sheet = ''.join(f'<span class="circleItem" data="x">{n}</span>' for n in numbers)
+    service.get = Mock(return_value=(sheet, WORK_URL))
+    with pytest.raises(ca.AssessmentUnavailable, match='完整题数'):
+        service.parse_open_paper(first, WORK_URL, 'homework', COURSE)
+    service.session.post.assert_not_called()
+
+
 def test_unknown_list_is_failure_not_successful_empty_course(service):
     service.get = Mock(return_value=('<html>Unsupported layout</html>', ca.HOST))
     assert service.run(COURSE, homework=True)['failed'] == 1

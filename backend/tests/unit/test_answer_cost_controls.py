@@ -138,6 +138,58 @@ def test_deepseek_specific_parameter_is_not_sent_to_other_providers(monkeypatch)
     assert 'thinking' not in provider._httpx_client.post.call_args.kwargs['json']
 
 
+def test_scoped_pro_thinking_omits_limit_and_keeps_model_for_fallback_key(monkeypatch):
+    provider, response = build_ai(monkeypatch)
+    provider.model = 'deepseek-v4-pro'
+    provider.thinking = True
+    provider.reasoning_effort = 'high'
+    provider.max_output_tokens = None
+    denied = Mock(status_code=401)
+    provider._httpx_client.post.side_effect = [denied, response]
+    assert provider._invoke_completion([]) == 'A'
+    for call in provider._httpx_client.post.call_args_list:
+        payload = call.kwargs['json']
+        assert payload['model'] == 'deepseek-v4-pro'
+        assert payload['thinking'] == {'type': 'enabled'}
+        assert payload['reasoning_effort'] == 'high'
+        assert 'max_tokens' not in payload
+
+
+def test_explicit_null_output_limit_survives_initialization(monkeypatch):
+    monkeypatch.setattr(ai_module, 'assert_public_endpoint', lambda value: value)
+    provider = AI()
+    provider.config_set({'endpoint': 'https://api.deepseek.com/chat/completions',
+                         'key': 'synthetic', 'model': 'deepseek-v4-pro',
+                         'max_output_tokens': None, 'thinking': True})
+    provider._build_client = Mock()
+    provider.init_tiku()
+    assert provider.max_output_tokens is None and provider.thinking is True
+    other = AI()
+    other.config_set({'endpoint': provider.endpoint, 'key': 'synthetic', 'model': 'deepseek-flash'})
+    other._build_client = Mock()
+    other.init_tiku()
+    assert other.max_output_tokens == 512 and other.thinking is False
+
+
+@pytest.mark.parametrize('fallback', [False, True])
+def test_bypass_local_answers_ignores_both_banks_and_cache_without_deleting_them(cache, monkeypatch, fallback):
+    cache.add_question_cache(question(), 'B')
+    monkeypatch.setattr(answer_base, 'lookup_local_question_bank', Mock(return_value='B'))
+    provider, go, ai = chain()
+    if not fallback:
+        provider = ai
+    provider.config_set({'bypass_local_answers': True, 'model': 'deepseek-v4-pro'})
+    assert provider.query(question()) == 'A'
+    assert provider.query(question()) == 'A'
+    assert ai._query.call_count == 2
+    answer_base.lookup_local_question_bank.assert_not_called()
+    assert cache.get_question_cache(question()) == 'B'
+    normal = AI()
+    normal._query = Mock(return_value='A')
+    assert normal.query(question()) == 'B'
+    normal._query.assert_not_called()
+
+
 def test_go_request_gate_is_shared_across_instances(monkeypatch):
     clock = [100.0]; starts = []
     monkeypatch.setattr(go_module, '_GO_LAST_START', 0.0)

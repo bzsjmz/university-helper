@@ -90,6 +90,8 @@ class AI(Tiku):
         self.retry_delay: float = _DEFAULT_RETRY_DELAY
         self.disable_ssl_verify: bool = False
         self.max_output_tokens = 512
+        self.thinking = False
+        self.reasoning_effort = "high"
         self._interval_lock = threading.Lock()
         # 全局并发控制：限制同一 AI 客户端同时在请求中的题目数量
         self.max_active_requests: int = 3
@@ -216,10 +218,13 @@ class AI(Tiku):
                 payload = {
                     "model": self.model,
                     "messages": messages,
-                    "max_tokens": self.max_output_tokens,
                 }
+                if self.max_output_tokens is not None:
+                    payload["max_tokens"] = self.max_output_tokens
                 if urlsplit(self.endpoint).hostname == "api.deepseek.com":
-                    payload["thinking"] = {"type": "disabled"}
+                    payload["thinking"] = {"type": "enabled" if self.thinking else "disabled"}
+                    if self.thinking:
+                        payload["reasoning_effort"] = self.reasoning_effort
                 request_started = time.monotonic()
                 control.claim_attempt("AI", 3)
                 try:
@@ -393,7 +398,13 @@ class AI(Tiku):
             self._conf.get("min_interval_seconds", _DEFAULT_MIN_INTERVAL_SECONDS),
             _DEFAULT_MIN_INTERVAL_SECONDS,
         )
-        self.max_output_tokens = min(4096, _parse_attempt_count(self._conf.get("max_output_tokens", 512), 512))
+        output_limit = self._conf.get("max_output_tokens", 512)
+        # Explicit null means omit the request field; absent keeps the default.
+        self.max_output_tokens = None if output_limit is None else min(4096, _parse_attempt_count(output_limit, 512))
+        self.thinking = self._conf.get("thinking") is True
+        self.reasoning_effort = str(self._conf.get("reasoning_effort", "high"))
+        if self.reasoning_effort not in {"low", "high", "max"}:
+            raise ValueError("Invalid AI reasoning effort")
         self.timeout = float(self._conf.get("timeout", os.environ.get("CHAOXING_AI_TIMEOUT_SECONDS", 30)))
         self.max_retries = _parse_attempt_count(self._conf.get("max_retries", _DEFAULT_MAX_RETRIES))
         self.retry_delay = _parse_non_negative_finite(
