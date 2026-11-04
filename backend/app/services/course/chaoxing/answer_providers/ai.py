@@ -233,7 +233,11 @@ class AI(Tiku):
                         headers=headers,
                         json=payload,
                         follow_redirects=False,
-                        **({"timeout": control.request_timeout(self.timeout)} if control.active_query() else {}),
+                        # Reasoning can be silent longer than the ordinary
+                        # 30-second request limit. It still shares the existing
+                        # question/job deadline, cancellation, and attempt cap.
+                        **({"timeout": min(self.timeout, control.remaining()) if self.thinking
+                            else control.request_timeout(self.timeout)} if control.active_query() else {}),
                     )
                 except Exception:
                     record_response("AI", role, attempt, request_started)

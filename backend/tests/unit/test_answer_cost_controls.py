@@ -155,6 +155,21 @@ def test_scoped_pro_thinking_omits_limit_and_keeps_model_for_fallback_key(monkey
         assert 'max_tokens' not in payload
 
 
+@pytest.mark.parametrize('thinking', [False, True])
+def test_reasoning_request_can_wait_within_question_deadline_without_changing_normal_limit(cache, monkeypatch, thinking):
+    from app.services.course.chaoxing import query_control as control
+    provider, response = build_ai(monkeypatch)
+    provider.timeout = 120
+    provider.thinking = thinking
+    with control.job_scope(lambda: False, answering=True):
+        assert provider.query(question()) == 'A'
+    timeout = provider._httpx_client.post.call_args.kwargs['timeout']
+    if thinking:
+        assert 110 < timeout <= 120
+    else:
+        assert 0 < timeout <= 30
+
+
 def test_explicit_null_output_limit_survives_initialization(monkeypatch):
     monkeypatch.setattr(ai_module, 'assert_public_endpoint', lambda value: value)
     provider = AI()
