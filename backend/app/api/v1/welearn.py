@@ -1,4 +1,6 @@
 """Owner-scoped persistent WE Learn workbench."""
+from typing import Literal
+
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field, StrictBool, model_validator
 
@@ -32,6 +34,7 @@ class Course(BaseModel):
 
 class Selection(Course):
     items: list[str] = Field(min_length=1, max_length=5000)
+    kind: Literal['lesson', 'class_task'] = 'lesson'
 
     @model_validator(mode='after')
     def ids(self):
@@ -46,11 +49,14 @@ class TaskRequest(BaseModel):
     submit: StrictBool = False
     allow_ai: StrictBool = True
     recording_bypass: StrictBool = False
+    start_class_tests: StrictBool = False
 
     @model_validator(mode='after')
     def options(self):
         if self.recording_bypass and not self.submit:
             raise ValueError('录音实验需要自动提交')
+        if any(s.kind == 'class_task' for s in self.selections) and not (self.start_class_tests and self.submit):
+            raise ValueError('开始班级测试需要明确允许开始及提交')
         if sum(len(s.items) for s in self.selections) > 5000:
             raise ValueError('一次最多选择 5000 个课节')
         return self
@@ -87,6 +93,11 @@ async def courses(aid: str, owner=Depends(get_current_user_id)):
 @router.post('/accounts/{aid}/items')
 async def items(aid: str, request: Course, owner=Depends(get_current_user_id)):
     return await call(welearn_workbench.items, owner, aid, request.course)
+
+
+@router.post('/accounts/{aid}/class-tasks')
+async def class_tasks(aid: str, request: Course, owner=Depends(get_current_user_id)):
+    return await call(welearn_workbench.class_tasks, owner, aid, request.course)
 
 
 @router.post('/accounts/{aid}/tasks')

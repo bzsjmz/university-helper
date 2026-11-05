@@ -130,6 +130,19 @@ class WelearnWorkbench:
                 cache['items'][course] = copy.deepcopy(result['items'])
             return result
 
+    def class_tasks(self, owner, aid, course):
+        with self.reserve(owner, aid) as row:
+            with self.lock:
+                cache = self.catalogs.get((str(owner), aid), {})
+                if course not in {c['id'] for c in cache.get('courses', [])}:
+                    raise PlatformError('请先读取该账号的课程')
+            result = self.engine.execute({'platform': 'welearn', 'action': 'class_tasks', 'course': course,
+                                          'credential': decrypt_str(row['credential_ciphertext'])})
+            self.refresh_credential(owner, row, result)
+            with self.lock:
+                cache.setdefault('class_tasks', {})[course] = copy.deepcopy(result['items'])
+            return result
+
     def start(self, owner, aid, config):
         with self.lock:
             row = self.store.account(owner, aid)
@@ -142,13 +155,20 @@ class WelearnWorkbench:
             for selection in config['selections']:
                 cid = selection['course']
                 ids = selection['items']
-                catalog = cache.get('items', {}).get(cid, [])
+                kind = selection.get('kind', 'lesson')
+                if kind not in ('lesson', 'class_task'):
+                    raise PlatformError('不支持的任务范围')
+                if kind == 'class_task' and not (config.get('start_class_tests') is True and config['submit'] is True):
+                    raise PlatformError('开始班级测试需要明确允许开始及提交')
+                catalog = cache.get('class_tasks' if kind == 'class_task' else 'items', {}).get(cid, [])
                 known = {i['id'] for i in catalog}
-                if (cid in seen or cid not in courses or not ids or len(ids) != len(set(ids))
+                if ((kind, cid) in seen or cid not in courses or not ids or len(ids) != len(set(ids))
                         or len(known) != len(catalog) or not set(ids).issubset(known)):
                     raise PlatformError('所选课程或课节已变化，请重新读取目录并选择范围')
-                seen.add(cid)
-                chosen.extend({'course': cid, 'course_name': courses[cid]['name'], **dict(i)}
+                if kind == 'class_task' and any(not i.get('selectable') and i.get('availability') != 'completed' for i in catalog if i['id'] in ids):
+                    raise PlatformError('班级任务未开放、已完成或需要人工处理，请重新读取')
+                seen.add((kind, cid))
+                chosen.extend({**dict(i), 'course': cid, 'course_name': courses[cid]['name'], 'kind': kind}
                               for i in catalog if i['id'] in set(ids))
             if not chosen or len(chosen) > 5000:
                 raise PlatformError('请选择 1–5000 个课节')
@@ -162,6 +182,7 @@ class WelearnWorkbench:
                     'current_item': '', 'results': [], 'counts': {},
                     'seconds': config['seconds'], 'submit': config['submit'],
                     'allow_ai': config['allow_ai'], 'recording_bypass': config['recording_bypass'],
+                    'start_class_tests': config.get('start_class_tests', False),
                     '_config': ciphertext, '_key': row['account_key'], 'cancel': threading.Event()}
             self.persist(task)  # Fail admission before starting any platform writes.
             self.tasks[task['id']] = task
@@ -189,6 +210,7 @@ class WelearnWorkbench:
                     result = self.engine.execute({'platform': 'welearn', 'action': 'answer',
                         'course': item['course'], 'item': item['id'], 'expected_name': item['name'],
                         'credential': decrypt_str(row['credential_ciphertext']),
+                        **({'class_task': True, 'start_class_tests': task['start_class_tests']} if item['kind'] == 'class_task' else {}),
                         **{k: task[k] for k in ('seconds', 'submit', 'allow_ai', 'recording_bypass')}}, task)
                 except PlatformError:
                     # A transport failure may follow a real submission: never replay it automatically.
@@ -200,6 +222,7 @@ class WelearnWorkbench:
                         if type(value) is int and value >= 0:
                             totals[key] = totals.get(key, 0) + value
                     task['results'].append({'course': item['course_name'], 'name': item['name'],
+                        'kind': item['kind'],
                         'status': result.get('status', 'needs_manual'),
                         'message': result.get('message', '请核对平台进度')})
                     task.update(completed_items=len(task['results']), counts=dict(totals))
@@ -256,7 +279,10 @@ class WelearnWorkbench:
         aid = old['account_id']
         self.courses(owner, aid)
         for selection in config['selections']:
-            self.items(owner, aid, selection['course'])
+            if selection.get('kind') == 'class_task':
+                self.class_tasks(owner, aid, selection['course'])
+            else:
+                self.items(owner, aid, selection['course'])
         # Same validation as a manual start, including deleted/closed lesson rejection.
         return self.start(owner, aid, config)
 

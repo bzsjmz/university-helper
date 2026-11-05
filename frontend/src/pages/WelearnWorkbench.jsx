@@ -7,21 +7,24 @@ const button = 'min-h-[40px] rounded-xl border border-border bg-surface px-4 py-
 const primary = `${button.replace('bg-surface', 'bg-primary').replace('hover:bg-surface-hover', 'hover:opacity-90')} text-white`
 const field = 'w-full rounded-xl border border-border bg-surface px-3 py-2 text-text'
 const active = (task) => ['running', 'stopping'].includes(task.status)
+const availability = { available: '可开始', upcoming: '未开始', completed: '已完成', expired: '已结束', manual: '需人工处理', unknown: '待核对' }
 const states = { running: '执行中', stopping: '停止中', finished: '执行结束', needs_manual: '需人工处理', failed: '失败', cancelled: '已停止', interrupted: '重启中断' }
 
 function AccountPanel({ account, checked, onChecked, onPlan, onLogin, onRefresh, perform, blocked }) {
   const [courses, setCourses] = useState([])
   const [course, setCourse] = useState('')
+  const [kind, setKind] = useState('lesson')
   const [catalogs, setCatalogs] = useState({})
   const [selected, setSelected] = useState({})
   const [loading, setLoading] = useState(false)
   const [label, setLabel] = useState(account.label)
   const version = useRef(0)
   const busy = blocked || loading || account.busy
+  const catalogKey = kind === 'class_task' ? `task:${course}` : course
   const count = Object.values(selected).reduce((n, ids) => n + ids.length, 0)
 
   useEffect(() => {
-    onPlan(account.id, Object.entries(selected).filter(([, ids]) => ids.length).map(([cid, ids]) => ({ course: cid, items: ids })))
+    onPlan(account.id, Object.entries(selected).filter(([, ids]) => ids.length).map(([cid, ids]) => cid.startsWith('task:') ? { course: cid.slice(5), items: ids, kind: 'class_task' } : { course: cid, items: ids }))
   }, [selected, account.id, onPlan])
   useEffect(() => () => { version.current++ }, [])
   useEffect(() => {
@@ -39,15 +42,15 @@ function AccountPanel({ account, checked, onChecked, onPlan, onLogin, onRefresh,
     const result = await api(`/welearn/accounts/${account.id}/courses`, { timeoutMs: 125000 })
     if (revision !== version.current) return
     setCourses(result.courses)
-    setSelected(old => Object.fromEntries(Object.entries(old).filter(([id]) => result.courses.some(c => c.id === id))))
+    setSelected(old => Object.fromEntries(Object.entries(old).filter(([id]) => result.courses.some(c => c.id === (id.startsWith('task:') ? id.slice(5) : id)))))
     setCourse(old => result.courses.some(c => c.id === old) ? old : result.courses.length === 1 ? result.courses[0].id : '')
   })
   const readItems = () => load(async () => {
     const revision = version.current
-    const result = await api(`/welearn/accounts/${account.id}/items`, { method: 'POST', timeoutMs: 125000, body: JSON.stringify({ course }) })
+    const result = await api(`/welearn/accounts/${account.id}/${kind === 'class_task' ? 'class-tasks' : 'items'}`, { method: 'POST', timeoutMs: 125000, body: JSON.stringify({ course }) })
     if (revision !== version.current) return
-    setCatalogs(old => ({ ...old, [course]: result.items }))
-    setSelected(old => ({ ...old, [course]: (old[course] || []).filter(id => result.items.some(i => i.id === id)) }))
+    setCatalogs(old => ({ ...old, [catalogKey]: result.items }))
+    setSelected(old => ({ ...old, [catalogKey]: (old[catalogKey] || []).filter(id => result.items.some(i => i.id === id && (kind === 'lesson' || i.selectable))) }))
   })
   const allCourses = () => load(async () => {
     const revision = version.current
@@ -59,12 +62,13 @@ function AccountPanel({ account, checked, onChecked, onPlan, onLogin, onRefresh,
       next[c.id] = data.items
     }
     if (revision !== version.current) return
-    setCourses(result.courses); setCatalogs(next)
+    setCourses(result.courses); setCatalogs(next); setKind('lesson')
     setCourse(result.courses[0]?.id || '')
     setSelected(Object.fromEntries(Object.entries(next).map(([id, items]) => [id, items.map(i => i.id)])))
   })
-  const items = catalogs[course] || []
-  const changeItems = (ids) => setSelected(old => ({ ...old, [course]: ids }))
+  const items = catalogs[catalogKey] || []
+  const selectable = items.filter(i => kind === 'lesson' || i.selectable)
+  const changeItems = (ids) => setSelected(old => ({ ...old, [catalogKey]: ids }))
 
   return <article className="space-y-4 rounded-2xl border border-border bg-surface p-5" aria-label={`账号 ${account.label}`}>
     <div className="flex flex-wrap items-center gap-3">
@@ -82,26 +86,31 @@ function AccountPanel({ account, checked, onChecked, onPlan, onLogin, onRefresh,
     {courses.length > 0 && <>
       <label className="block text-sm">课程
         <select className={`${field} mt-1`} value={course} disabled={busy} onChange={e => setCourse(e.target.value)}>
-          <option value="">请选择课程</option>{courses.map(c => <option key={c.id} value={c.id}>{c.name}（已选 {selected[c.id]?.length || 0} 节）</option>)}
+          <option value="">请选择课程</option>{courses.map(c => <option key={c.id} value={c.id}>{c.name}（已选 {(selected[c.id]?.length || 0) + (selected[`task:${c.id}`]?.length || 0)} 项）</option>)}
         </select>
       </label>
-      <button className={button} disabled={busy || !course} onClick={readItems}>读取／刷新课节</button>
+      <fieldset className="flex flex-wrap gap-4 text-sm"><legend className="mb-2">内容范围</legend>
+        <label><input type="radio" name={`kind-${account.id}`} checked={kind === 'lesson'} disabled={busy} onChange={() => setKind('lesson')} /> 课程课节</label>
+        <label><input type="radio" name={`kind-${account.id}`} checked={kind === 'class_task'} disabled={busy} onChange={() => setKind('class_task')} /> 班级任务</label>
+      </fieldset>
+      <button className={button} disabled={busy || !course} onClick={readItems}>{kind === 'class_task' ? '读取／刷新班级任务' : '读取／刷新课节'}</button>
+      {kind === 'class_task' && <p className="text-xs text-text-muted">班级任务与课节进度分别核对。未开始、已结束和已完成的任务会展示；口语及未支持的任务需在官网处理。</p>}
     </>}
-    {catalogs[course] && <div className="space-y-3">
+    {catalogs[catalogKey] && <div className="space-y-3">
       <div className="flex flex-wrap gap-2">
-        <button className={button} disabled={busy || !items.length} onClick={() => changeItems(items.map(i => i.id))}>全选本课程课节</button>
+        <button className={button} disabled={busy || !selectable.length} onClick={() => changeItems(selectable.map(i => i.id))}>{kind === 'class_task' ? '全选可开始的班级测试' : '全选本课程课节'}</button>
         <button className={button} disabled={busy} onClick={() => changeItems([])}>取消本课程选择</button>
       </div>
       <div className="max-h-64 space-y-1 overflow-y-auto rounded-xl border border-border p-2">
-        {!items.length && <p className="p-2 text-sm">该课程暂未开放课节</p>}
+        {!items.length && <p className="p-2 text-sm">{kind === 'class_task' ? '该课程暂无班级任务' : '该课程暂未开放课节'}</p>}
         {items.map(item => <label key={item.id} className="flex items-start gap-2 rounded-lg p-2 text-sm hover:bg-surface-hover">
-          <input type="checkbox" className="mt-1" checked={(selected[course] || []).includes(item.id)} disabled={busy} onChange={e => changeItems(e.target.checked ? [...(selected[course] || []), item.id] : (selected[course] || []).filter(id => id !== item.id))} />
-          <span>{item.name}{['true', '1', '已完成', 'completed'].includes(String(item.progress).toLowerCase()) && <span className="ml-2 text-success">已完成，将跳过</span>}</span>
+          <input type="checkbox" className="mt-1" checked={(selected[catalogKey] || []).includes(item.id)} disabled={busy || kind === 'class_task' && !item.selectable} onChange={e => changeItems(e.target.checked ? [...(selected[catalogKey] || []), item.id] : (selected[catalogKey] || []).filter(id => id !== item.id))} />
+          <span>{item.name}{kind === 'class_task' && <span className="block text-xs text-text-muted">{item.type} · {availability[item.availability] || '待核对'} · {item.progress} · 开始：{item.begin} · 截止：{item.end}</span>}{kind === 'lesson' && ['true', '1', '已完成', 'completed'].includes(String(item.progress).toLowerCase()) && <span className="ml-2 text-success">已完成，将跳过</span>}</span>
         </label>)}
       </div>
     </div>}
-    <p className="text-sm font-semibold">已选 {Object.values(selected).filter(ids => ids.length).length} 门课程 · {count} 节</p>
-    {courses.filter(c => selected[c.id]?.length).map(c => <p key={c.id} className="text-xs text-text-muted">{c.name} · {selected[c.id].length} 节</p>)}
+    <p className="text-sm font-semibold">已选 {new Set(Object.keys(selected).filter(k => selected[k].length).map(k => k.startsWith('task:') ? k.slice(5) : k)).size} 门课程 · {count} 项</p>
+    {courses.filter(c => selected[c.id]?.length || selected[`task:${c.id}`]?.length).map(c => <p key={c.id} className="text-xs text-text-muted">{c.name} · {selected[c.id]?.length || 0} 课节 · {selected[`task:${c.id}`]?.length || 0} 班级任务</p>)}
     <details className="text-sm"><summary className="cursor-pointer text-text-muted">账号管理</summary>
       <form className="mt-3 flex flex-wrap gap-2" onSubmit={event => { event.preventDefault(); load(async () => {
         await api(`/welearn/accounts/${account.id}`, { method: 'PATCH', body: JSON.stringify({ label: label.trim() }) }); await onRefresh()
@@ -132,6 +141,7 @@ export default function WelearnWorkbench() {
   const [allowAi, setAllowAi] = useState(true)
   const [recording, setRecording] = useState(false)
   const [seconds, setSeconds] = useState(300)
+  const [startClassTests, setStartClassTests] = useState(false)
   const alive = useRef(true)
   const polling = useRef(false)
   const refresh = useCallback(async () => {
@@ -160,7 +170,8 @@ export default function WelearnWorkbench() {
   const check = (aid, value) => setSelected(old => value ? [...new Set([...old, aid])] : old.filter(id => id !== aid))
   const ready = accounts.filter(a => selected.includes(a.id) && plans[a.id]?.length && !a.busy)
   const total = ready.reduce((n, a) => n + plans[a.id].reduce((v, s) => v + s.items.length, 0), 0)
-  const valid = Number.isInteger(Number(seconds)) && seconds >= 30 && seconds <= 1800
+  const hasClassTasks = ready.some(a => plans[a.id].some(s => s.kind === 'class_task'))
+  const valid = (!hasClassTasks || startClassTests && submit) && Number.isInteger(Number(seconds)) && seconds >= 30 && seconds <= 1800
   const save = async (connected) => {
     setSession(connected); setBusy(true)
     await perform(async () => {
@@ -181,7 +192,7 @@ export default function WelearnWorkbench() {
     // Independent threads begin as soon as each request succeeds; failures never replay successful accounts.
     for (const account of ready) {
       try {
-        await api(`/welearn/accounts/${account.id}/tasks`, { method: 'POST', body: JSON.stringify({ selections: plans[account.id], seconds: Number(seconds), submit, allow_ai: allowAi, recording_bypass: recording && submit }) })
+        await api(`/welearn/accounts/${account.id}/tasks`, { method: 'POST', body: JSON.stringify({ selections: plans[account.id], seconds: Number(seconds), submit, allow_ai: allowAi, recording_bypass: recording && submit, start_class_tests: startClassTests && submit }) })
         succeeded++
         check(account.id, false)
       } catch (error) { errors.push(`${account.label}：${error.message}`) }
@@ -193,7 +204,7 @@ export default function WelearnWorkbench() {
   return <div className="space-y-6">
     <header className="rounded-2xl border border-primary/20 bg-primary/5 p-6">
       <div className="flex items-center gap-3"><BookOpen className="h-7 w-7 text-primary" /><h1 className="text-2xl font-bold">WE Learn 工作台</h1><span className="rounded-full bg-surface px-2 py-1 text-xs text-text-muted">测试版</span></div>
-      <p className="mt-3 text-sm leading-6 text-text-muted">保存登录、选择账号、全选课节后即可批量启动。不同账号同时执行，同一账号按课程和课节顺序处理；平台已完成的课节会跳过。</p>
+      <p className="mt-3 text-sm leading-6 text-text-muted">保存登录，选择账号和课程中的课节或班级任务后即可批量启动。不同账号同时执行，同一账号按所选内容顺序处理；平台已完成的内容会跳过。</p>
       <div className="mt-4 flex flex-wrap gap-5 text-sm"><span className="inline-flex items-center gap-2"><Users className="h-4 w-4" />{accounts.length} 个已保存账号</span><span className="inline-flex items-center gap-2"><CheckCircle className="h-4 w-4" />{tasks.filter(active).length} 个活动任务</span></div>
     </header>
     <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-lg font-bold">账号与课程</h2><button className={button} disabled={busy || loginTarget !== null} onClick={() => { setLoginTarget({}); setLabel(''); setSession(null) }}>添加账号</button></div>
@@ -209,13 +220,14 @@ export default function WelearnWorkbench() {
       blocked={busy} perform={perform} onRefresh={refresh} onLogin={a => { setLoginTarget(a); setLabel(a.label); setSession(null) }} />)}</div>
     <section className="space-y-4 rounded-2xl border border-border bg-surface p-5" aria-label="批量启动设置">
       <div className="flex flex-wrap items-center gap-3"><h2 className="mr-auto text-lg font-bold">批量启动</h2><button className={button} disabled={busy} onClick={() => setSelected(accounts.filter(a => !a.busy).map(a => a.id))}>全选空闲账号</button><button className={button} disabled={busy} onClick={() => setSelected([])}>取消账号选择</button></div>
-      <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={submit} disabled={busy} onChange={e => { setSubmit(e.target.checked); if (!e.target.checked) setRecording(false) }} />答案完整并复核后自动提交</label>
+      <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={submit} disabled={busy} onChange={e => { setSubmit(e.target.checked); if (!e.target.checked) { setRecording(false); setStartClassTests(false) } }} />答案完整并复核后自动提交</label>
       <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={allowAi} disabled={busy} onChange={e => setAllowAi(e.target.checked)} />课件与缓存未命中时使用 AI（可能产生费用）</label>
       <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={recording && submit} disabled={busy || !submit} onChange={e => setRecording(e.target.checked)} />启用录音实验处理</label>
+      {hasClassTasks && <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={startClassTests} disabled={busy || !submit} onChange={e => setStartClassTests(e.target.checked)} />允许开始所选班级测试（进入后可能计时，停止程序不会暂停平台计时）</label>}
       {recording && <p className="text-sm text-text-muted">录音实验不生成可播放音频；朗读／对话为 0 分占位，不代表真实测评，完成状态以平台回读为准。</p>}
       <details className="text-sm"><summary className="cursor-pointer text-text-muted">更多设置</summary><label className="mt-3 block">每节答题预算（秒，30–1800）<input className={`${field} mt-1 max-w-xs`} type="number" min={30} max={1800} step={1} value={seconds} disabled={busy} onChange={e => setSeconds(e.target.value)} /></label><p className="mt-2 text-text-muted">每节至少停留 10 秒；新的 AI 查题请求间隔随机 20–40 秒。预算是最长处理时间。</p></details>
-      <div className="rounded-xl bg-background p-4 text-sm"><p className="font-semibold">本次将启动 {ready.length} 个账号 · {total} 节 · {submit ? '允许自动提交' : '仅尝试保存'} · {allowAi ? '允许 AI' : '不使用 AI'}</p>
-        {ready.map(a => <p key={a.id} className="mt-1 text-text-muted">{a.label}：{plans[a.id].length} 门课程，{plans[a.id].reduce((n, s) => n + s.items.length, 0)} 节</p>)}
+      <div className="rounded-xl bg-background p-4 text-sm"><p className="font-semibold">本次将启动 {ready.length} 个账号 · {total} 项 · {submit ? '允许自动提交' : '仅尝试保存'} · {allowAi ? '允许 AI' : '不使用 AI'}</p>
+        {ready.map(a => <p key={a.id} className="mt-1 text-text-muted">{a.label}：{new Set(plans[a.id].map(s => s.course)).size} 门课程，{plans[a.id].filter(s => s.kind !== 'class_task').reduce((n, s) => n + s.items.length, 0)} 课节，{plans[a.id].filter(s => s.kind === 'class_task').reduce((n, s) => n + s.items.length, 0)} 班级测试</p>)}
         {selected.some(id => !ready.some(a => a.id === id)) && <p className="mt-2 text-text-muted">忙碌或尚未选择课节的账号不会启动。</p>}
       </div>
       <button className={primary} disabled={busy || !ready.length || !valid} onClick={start}>{busy ? '正在处理…' : '确认并启动所选账号'}</button>
@@ -225,10 +237,10 @@ export default function WelearnWorkbench() {
       {!tasks.length && <p className="text-sm text-text-muted">暂无任务</p>}
       {tasks.map(task => <article key={task.id} className="space-y-2 rounded-2xl border border-border bg-surface p-5">
         <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold">{task.account_label}</h3><span className="text-sm">{states[task.status] || task.status}</span></div>
-        <p className="text-sm">已处理 {task.completed_items}/{task.total_items} 节 · 平台确认完成 {task.counts?.platform_completed || 0} · 已完成跳过 {task.counts?.skipped || 0}</p>
+        <p className="text-sm">已处理 {task.completed_items}/{task.total_items} 项 · 平台确认完成 {task.counts?.platform_completed || 0} · 已完成跳过 {task.counts?.skipped || 0}</p>
         <p className="text-sm text-text-muted">{task.message}</p>{active(task) && <p className="text-sm text-text-muted">当前：{task.current_item || '正在读取课节'}</p>}
         <p className="text-xs text-text-muted">题目 {task.counts?.questions || 0} · 有答案 {task.counts?.answered || 0} · 已填 {task.counts?.filled || 0} · 课件答案 {task.counts?.native_answers || 0} · 缓存 {task.counts?.cache_hits || 0} · AI {task.counts?.ai_answers || 0} · 缺失 {task.counts?.missing || 0} · 不支持 {task.counts?.unsupported || 0} · 已提交 {task.counts?.submitted || 0} · 拒绝 {task.counts?.submission_rejected || 0} · 回执未确认 {task.counts?.submission_unknown || 0}</p>
-        {task.results?.length > 0 && <details className="text-sm"><summary className="cursor-pointer">逐节结果</summary><div className="mt-2 max-h-80 space-y-2 overflow-auto">{task.results.map((r, i) => <p key={i}>{r.course} &gt; {r.name} · {states[r.status] || r.status} · {r.message}</p>)}</div></details>}
+        {task.results?.length > 0 && <details className="text-sm"><summary className="cursor-pointer">逐项结果</summary><div className="mt-2 max-h-80 space-y-2 overflow-auto">{task.results.map((r, i) => <p key={i}>{r.course} &gt; {r.kind === 'class_task' ? '班级任务：' : ''}{r.name} · {states[r.status] || r.status} · {r.message}</p>)}</div></details>}
         <div className="flex gap-2">{active(task) ? <button className={button} disabled={busy || task.status === 'stopping'} onClick={() => perform(async () => { await api(`/welearn/tasks/${task.id}/stop`, { method: 'POST' }); await refresh() })}>停止</button> : <>
           <button className={button} disabled={busy || accounts.find(a => a.id === task.account_id)?.busy || !accounts.some(a => a.id === task.account_id)} onClick={async () => { setBusy(true); await perform(async () => { await api(`/welearn/tasks/${task.id}/restart`, { method: 'POST', timeoutMs: 125000 }); await refresh() }); setBusy(false) }}>重新启动</button>
           <button className={button} disabled={busy} onClick={() => perform(async () => { await api(`/welearn/tasks/${task.id}`, { method: 'DELETE' }); await refresh() })}>删除记录</button>

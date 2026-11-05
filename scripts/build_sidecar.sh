@@ -50,6 +50,7 @@ fi
   --exclude-module psycopg2 \
   --add-data "frontend/dist${SEP}frontend/dist" \
   --add-data "backend/app/services/course/english/question_form.js${SEP}app/services/course/english" \
+  --add-data "backend/app/services/course/english/welearn_class_form.js${SEP}app/services/course/english" \
   --add-data "backend/app/services/course/english/native_answers.js${SEP}app/services/course/english" \
   --add-data "backend/app/services/course/english/recording_bypass.js${SEP}app/services/course/english" \
   backend/desktop_entry.py

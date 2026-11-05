@@ -34,8 +34,16 @@ def main():
                 elif action == 'items':
                     _, items = client.items(request['course'])
                     result = {'items': items}
+                elif action == 'class_tasks':
+                    from .welearn_class_tasks import catalogue, public_task
+                    result = {'items': [public_task(r) for r in catalogue(client, request['course'])]}
                 elif action == 'answer':
-                    if request.get('recording_bypass', False):
+                    if request.get('class_task', False):
+                        from .welearn_class_tasks import answer as class_answer
+                        result = class_answer(request['credential'], request['course'], request['item'],
+                            request['seconds'], ask_parent, submit=request.get('submit', False),
+                            start_class_tests=request.get('start_class_tests', False))
+                    elif request.get('recording_bypass', False):
                         from .clients import welearn_answer as recording_answer
                         result = recording_answer(request['credential'], request['course'], request['item'],
                             request['seconds'], ask_parent, submit=request.get('submit', False), recording_bypass=True)
@@ -44,7 +52,7 @@ def main():
                             request['seconds'], ask_parent, submit=request.get('submit', False))
                 else:
                     result = client.study(request['course'], request['item'], request['seconds'])
-                if action in ('account', 'connect', 'items'):
+                if action in ('account', 'connect', 'items', 'class_tasks'):
                     result['_credential'] = client.export_credential()
             finally:
                 client.session.close()

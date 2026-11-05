@@ -18,6 +18,12 @@ beforeEach(() => {
     }
     if (path === '/welearn/tasks') return { tasks: [...mocks.tasks] }
     if (path.endsWith('/courses')) return { courses: [{ id: 'c', name: 'College English' }, { id: 'd', name: 'Listening' }] }
+    if (path.endsWith('/class-tasks')) return { items: [
+      { id: 'available', name: 'Open quiz', type: '测试', availability: 'available', selectable: true, progress: '未完成', begin: '-', end: '2026/12/01 23:59' },
+      { id: 'future', name: 'Future quiz', type: '测试', availability: 'upcoming', selectable: false, progress: '未完成', begin: '2026/12/01 15:00', end: '2026/12/08 23:59' },
+      { id: 'oral', name: 'Speaking task', type: '口语训练', availability: 'manual', selectable: false, progress: '未完成', begin: '-', end: '2026/12/01 23:59' },
+      { id: 'graded', name: 'Graded quiz', type: '测试', availability: 'completed', selectable: false, progress: '80 分', begin: '-', end: '-' },
+    ] }
     if (path.endsWith('/items')) {
       const course = JSON.parse(options.body).course
       return { items: [{ id: course + '-1', name: course === 'c' ? 'Unit 1' : 'Unit 2', progress: 'false' }, { id: course + '-2', name: 'Reading', progress: 'true' }] }
@@ -37,16 +43,16 @@ test('restores saved accounts without asking for login; explicit select-all prev
   expect(screen.getByRole('button', { name: '确认并启动所选账号' })).toBeDisabled()
   for (const name of ['Alice', 'Bob']) {
     await user.click(panel(name).getByRole('button', { name: '全选全部课程与课节' }))
-    await waitFor(() => expect(panel(name).getByText('已选 2 门课程 · 4 节')).toBeInTheDocument())
+    await waitFor(() => expect(panel(name).getByText('已选 2 门课程 · 4 项')).toBeInTheDocument())
   }
   expect(posts()).toHaveLength(0)
   await user.click(screen.getByRole('button', { name: '全选空闲账号' }))
-  expect(screen.getByText(/本次将启动 2 个账号 · 8 节/)).toBeInTheDocument()
+  expect(screen.getByText(/本次将启动 2 个账号 · 8 项/)).toBeInTheDocument()
   await user.click(screen.getByRole('button', { name: '确认并启动所选账号' }))
   await waitFor(() => expect(posts()).toHaveLength(2))
   expect(posts().map(([path]) => path)).toEqual(['/welearn/accounts/a/tasks', '/welearn/accounts/b/tasks'])
   const body = JSON.parse(posts()[0][1].body)
-  expect(body).toEqual({ selections: [{ course: 'c', items: ['c-1', 'c-2'] }, { course: 'd', items: ['d-1', 'd-2'] }], seconds: 300, submit: true, allow_ai: true, recording_bypass: false })
+  expect(body).toEqual({ selections: [{ course: 'c', items: ['c-1', 'c-2'] }, { course: 'd', items: ['d-1', 'd-2'] }], seconds: 300, submit: true, allow_ai: true, recording_bypass: false, start_class_tests: false })
   expect(JSON.stringify(localStorage)).not.toContain('temporary')
 })
 
@@ -141,7 +147,7 @@ test('busy accounts cannot edit or start; saved interrupted tasks have restart a
   await screen.findByRole('article', { name: '账号 Alice' })
   expect(panel('Alice').getByRole('button', { name: '更新登录' })).toBeDisabled()
   expect(panel('Alice').getByRole('button', { name: '全选全部课程与课节' })).toBeDisabled()
-  await user.click(screen.getByText('逐节结果'))
+  await user.click(screen.getByText('逐项结果'))
   expect(screen.getByText(/Speaking · 需人工处理 · 录音未确认/)).toBeVisible()
   await user.click(screen.getByRole('button', { name: '重新启动' }))
   await waitFor(() => expect(mocks.api).toHaveBeenCalledWith('/welearn/tasks/old/restart', expect.objectContaining({ method: 'POST' })))
@@ -156,4 +162,47 @@ test('refreshing a saved workbench never automatically selects accounts or lesso
   expect(panel('Alice').getByRole('checkbox', { name: 'Alice' })).not.toBeChecked()
   expect(posts()).toHaveLength(0)
   expect(screen.getByRole('button', { name: '确认并启动所选账号' })).toBeDisabled()
+})
+
+test('class tasks keep dates and grades visible; only available quizzes are selected with explicit start consent', async () => {
+  const user = userEvent.setup()
+  render(<WelearnWorkbench />)
+  await screen.findByRole('article', { name: '账号 Alice' })
+  await user.click(panel('Alice').getByRole('button', { name: '读取课程' }))
+  await user.selectOptions(panel('Alice').getByRole('combobox'), 'c')
+  await user.click(panel('Alice').getByRole('radio', { name: '班级任务' }))
+  await user.click(panel('Alice').getByRole('button', { name: '读取／刷新班级任务' }))
+  expect(panel('Alice').getByRole('checkbox', { name: /Future quiz/ })).toBeDisabled()
+  expect(panel('Alice').getByRole('checkbox', { name: /Speaking task/ })).toBeDisabled()
+  expect(panel('Alice').getByRole('checkbox', { name: /Graded quiz/ })).toBeDisabled()
+  expect(panel('Alice').getByText(/80 分/)).toBeVisible()
+  expect(panel('Alice').getByText(/2026\/12\/08/)).toBeVisible()
+  await user.click(panel('Alice').getByRole('button', { name: '全选可开始的班级测试' }))
+  await user.click(panel('Alice').getByRole('checkbox', { name: 'Alice' }))
+  expect(screen.getByRole('button', { name: '确认并启动所选账号' })).toBeDisabled()
+  await user.click(screen.getByRole('checkbox', { name: /允许开始所选班级测试/ }))
+  await user.click(screen.getByRole('button', { name: '确认并启动所选账号' }))
+  await waitFor(() => expect(posts()).toHaveLength(1))
+  expect(JSON.parse(posts()[0][1].body)).toMatchObject({ selections: [{ course: 'c', items: ['available'], kind: 'class_task' }], start_class_tests: true })
+})
+
+test('class and lesson selections can coexist; selecting all lessons never adds class tests', async () => {
+  const user = userEvent.setup()
+  render(<WelearnWorkbench />)
+  await screen.findByRole('article', { name: '账号 Alice' })
+  await user.click(panel('Alice').getByRole('button', { name: '全选全部课程与课节' }))
+  await user.click(panel('Alice').getByRole('radio', { name: '班级任务' }))
+  await user.click(panel('Alice').getByRole('button', { name: '读取／刷新班级任务' }))
+  await user.click(panel('Alice').getByRole('checkbox', { name: /Open quiz/ }))
+  await user.click(panel('Alice').getByRole('checkbox', { name: 'Alice' }))
+  await user.click(screen.getByRole('checkbox', { name: /允许开始所选班级测试/ }))
+  await user.click(screen.getByRole('checkbox', { name: '答案完整并复核后自动提交' }))
+  expect(screen.getByRole('checkbox', { name: /允许开始所选班级测试/ })).not.toBeChecked()
+  expect(screen.getByRole('button', { name: '确认并启动所选账号' })).toBeDisabled()
+  await user.click(panel('Alice').getByRole('button', { name: '全选全部课程与课节' }))
+  expect(panel('Alice').getByRole('radio', { name: '课程课节' })).toBeChecked()
+  await user.click(screen.getByRole('button', { name: '确认并启动所选账号' }))
+  await waitFor(() => expect(posts()).toHaveLength(1))
+  expect(JSON.parse(posts()[0][1].body).selections.every(s => !s.kind)).toBe(true)
+  expect(mocks.api.mock.calls.filter(([p]) => p.endsWith('/class-tasks'))).toHaveLength(1)
 })
