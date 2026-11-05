@@ -111,6 +111,8 @@ function MultiPillGroup({ label, options, value, onChange, hint }) {
 
 export default function ConfigSection({
   learnChapters = true, setLearnChapters,
+  reviewChapterVisits = true, setReviewChapterVisits,
+  passingScore = 60, setPassingScore,
   courseHomework = false, setCourseHomework,
   courseExams = false, setCourseExams,
   speed,
@@ -153,6 +155,21 @@ export default function ConfigSection({
         {(courseHomework || courseExams) && <p className="text-xs text-text-muted">已提交项目会跳过；无法匹配全部答案时仅保存，需人工完成。验证码、人脸、口令、监考或不支持的试卷会提示人工处理。AI 回退可能产生费用。</p>}
         {courseExams && <p className="text-xs text-text-muted">进入考试后，平台计时可能持续；暂停或停止本地任务不会暂停平台考试计时。</p>}
         {!learnChapters && !courseHomework && !courseExams && <p role="alert" className="text-sm text-danger">请至少勾选一种任务范围。</p>}
+      </fieldset>
+      <fieldset className="space-y-3">
+        <legend className="text-sm font-medium">平台成绩核验</legend>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={reviewChapterVisits} disabled={!learnChapters}
+            onChange={event => setReviewChapterVisits?.(event.target.checked)} />
+          补齐计分的章节学习次数
+        </label>
+        <label className="flex items-center gap-3 text-sm">成绩参考及格线
+          <input type="number" min="0" max="100" step="1" value={passingScore}
+            onChange={event => setPassingScore?.(Math.min(100, Math.max(0, toNum(event.target.value, 60))))}
+            className="w-24 rounded-lg border border-border bg-surface px-3 py-2" />
+        </label>
+        <p className="text-xs text-text-muted">逐课读取考核权重和平台实际成绩，任务点完成不等于及格。整课章节学习开启时，仅对计分且未满的章节次数正常复习；平台统计可能延迟，复习可能额外耗时。</p>
+        <p className="text-xs text-text-muted">选择章节终点时不扩大为整课复习。无法核验或仍未及格会提示缺项，不因此重做作业或考试；阅读时长不自动补齐。</p>
       </fieldset>
       {/* Everyday playback settings */}
       <div className="grid gap-5 md:grid-cols-2">

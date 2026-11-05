@@ -42,6 +42,9 @@ class ChaoxingCourseDataService:
             from .decode import decode_course_list
 
             _resp = _session.post(_url, data=_data)
+            remember = getattr(self.course_service, "remember_native_entries", None)
+            if callable(remember):
+                remember(_resp.text)
             course_list += decode_course_list(_resp.text)
         return course_list
 

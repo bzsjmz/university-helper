@@ -59,6 +59,9 @@ class CourseStartRequest(BaseModel):
     # study, inclusive. Courses without an entry are studied in full.
     chapter_limits: Annotated[dict[_ChapterLimitKey, _ChapterLimitValue], Field(max_length=100)] | None = None
     learn_chapters: StrictBool = True
+    verify_grades: StrictBool = True
+    review_chapter_visits: StrictBool = True
+    passing_score: float = Field(default=60, ge=0, le=100, allow_inf_nan=False)
     course_homework: StrictBool = False
     revise_homework: StrictBool = False
     course_homework_titles: Annotated[list[_ChapterLimitKey], Field(max_length=100)] | None = None

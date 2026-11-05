@@ -1,5 +1,8 @@
 import re
 import time
+from urllib.parse import parse_qs, urljoin, urlsplit
+
+from bs4 import BeautifulSoup
 
 from loguru import logger
 
@@ -13,6 +16,28 @@ def get_timestamp():
 class ChaoxingCourseService:
     def __init__(self, session_manager=None):
         self.session_manager = session_manager
+        # Signed native entry URLs remain in this private per-account session.
+        self._native_entries = {}
+
+    def remember_native_entries(self, html):
+        for node in BeautifulSoup(html, "lxml").select("div.course"):
+            try:
+                course_id = node.select_one("input.courseId")["value"]
+                class_id = node.select_one("input.clazzId")["value"]
+                url = urljoin("https://mooc2-ans.chaoxing.com", node.select_one("a[href]")["href"])
+                parsed = urlsplit(url)
+                params = {k.lower(): v[0] for k, v in parse_qs(parsed.query).items()}
+                if (parsed.scheme != "https" or parsed.hostname not in {"mooc2-ans.chaoxing.com", "mooc1.chaoxing.com", "mooc1-1.chaoxing.com"}
+                        or parsed.username or parsed.password or parsed.port not in (None, 443)
+                        or params.get("courseid") != str(course_id) or params.get("clazzid") != str(class_id)
+                        or not params.get("cpi")):
+                    continue
+                self._native_entries[(str(course_id), str(class_id), params["cpi"])] = url
+            except (AttributeError, KeyError, TypeError, ValueError):
+                continue
+
+    def native_course_entry(self, course):
+        return self._native_entries.get(tuple(str(course[k]) for k in ("courseId", "clazzId", "cpi")))
 
     def get_course_list(self):
         _session = self.session_manager.get_session()
@@ -24,6 +49,7 @@ class ChaoxingCourseService:
             "Referer": "https://mooc2-ans.chaoxing.com/mooc-ans/visit/interaction?moocDomain=https://mooc1-1.chaoxing.com/mooc-ans",
         }
         _resp = _session.post(_url, headers=_headers, data=_data)
+        self.remember_native_entries(_resp.text)
         logger.info("课程列表读取完毕...")
         course_list = decode_course_list(_resp.text)
         return course_list

@@ -194,6 +194,7 @@ async def test_restart_decrypts_config_and_uses_current_saved_account_credential
     sent = instance.start_task.call_args.args[1]
     assert sent['concurrency'] == 4 and sent['chapter_limits'] == {'course-a': 'chapter-5'}
     assert sent['learn_chapters'] is False and sent['course_homework'] is True and sent['course_exams'] is True
+    assert sent['review_chapter_visits'] is True
     assert sent['password'] == 'rotated-password' and sent['tiku_config']['token'] == 'test-token'
     assert 'test-token' not in sent['_restart_config']
     instance.restart_config.return_value = ('a', None)
@@ -242,6 +243,7 @@ async def test_restart_replaces_only_its_old_record_after_admission(monkeypatch)
     monkeypatch.setattr(api, 'managed_accounts', store)
     monkeypatch.setattr(api, '_get_learning_manager', lambda: instance)
     response = await api.restart_task('old-task', 'owner')
+    assert instance.start_task.call_args.args[1]['review_chapter_visits'] is False
     assert events == ['start', ('delete', ('owner', 'old-task'))]
     assert response['previous_task_removed'] is True
     assert response['task_id'] == 'new-task' and response['replaced_task_id'] == 'old-task'

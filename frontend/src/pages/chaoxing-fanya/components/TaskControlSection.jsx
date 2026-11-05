@@ -1,4 +1,5 @@
 import { CARD, DONE_STATUSES, toNum, normalizeCourseText } from '../utils'
+import CourseGradeResults from './CourseGradeResults'
 
 
 export default function TaskControlSection({
@@ -17,6 +18,7 @@ export default function TaskControlSection({
   const assessmentTitle = homeworkEnabled && !examsEnabled ? '课程作业处理结果'
     : examsEnabled && !homeworkEnabled ? '课程考试处理结果' : '作业／考试处理结果'
   const currentTask = taskStatus?.current_task === 'course-assessment' ? '作业／考试'
+    : taskStatus?.current_task === 'chapter-visits' ? '章节次数复习／成绩核验'
     : taskStatus?.current_task === 'finished' ? '已结束' : taskStatus?.current_task || '--'
   const currentCourseName = normalizeCourseText(progress.current_course)
   const videoProgress = progress.video_progress && typeof progress.video_progress === 'object' ? progress.video_progress : null
@@ -29,6 +31,7 @@ export default function TaskControlSection({
 
   return (
     <section className={CARD}>
+      <CourseGradeResults progress={progress} />
 
 
       <div className="mb-4 flex flex-wrap gap-2">

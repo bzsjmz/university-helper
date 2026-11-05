@@ -5,6 +5,8 @@ export default function useTaskConfig() {
 
 
   const [learnChapters, setLearnChapters] = useState(true)
+  const [reviewChapterVisits, setReviewChapterVisits] = useState(true)
+  const [passingScore, setPassingScore] = useState(60)
   const [courseHomework, setCourseHomework] = useState(false)
   const [courseExams, setCourseExams] = useState(false)
 
@@ -45,6 +47,8 @@ export default function useTaskConfig() {
 
   return {
     learnChapters, setLearnChapters,
+    reviewChapterVisits, setReviewChapterVisits,
+    passingScore, setPassingScore,
     courseHomework, setCourseHomework,
     courseExams, setCourseExams,
     speed, setSpeed,

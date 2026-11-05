@@ -1,4 +1,5 @@
 import logging
+import math
 import os
 import threading
 import time
@@ -15,6 +16,8 @@ from .endpoint_security import validate_tiku_config
 from .learning import ChapterTask, JobProcessor, init_chaoxing
 from .payload_mapper import normalize_tiku_config
 from .course_assessments import CourseAssessmentService
+from .course_grades import CourseGradeService
+from .native_visits import ChapterVisitReview
 from . import query_control as control
 from .exceptions import diagnostic_reason
 from .task_admission import (
@@ -186,9 +189,12 @@ class ChaoxingLearningManager:
         # detail-free exception to a 4xx response; direct callers get the same
         # fail-closed behavior.
         validate_tiku_config((payload or {}).get("tiku_config"))
-        for key in ("learn_chapters", "course_homework", "course_exams", "revise_homework"):
+        for key in ("learn_chapters", "course_homework", "course_exams", "revise_homework", "verify_grades", "review_chapter_visits"):
             if key in (payload or {}) and type(payload[key]) is not bool:
                 raise ValueError("Task scope flags must be booleans")
+        target = float((payload or {}).get("passing_score", 60))
+        if not math.isfinite(target) or not 0 <= target <= 100:
+            raise ValueError("Invalid passing score")
         if not any((payload or {}).get(key, default) is True for key, default in
                    (("learn_chapters", True), ("course_homework", False), ("course_exams", False))):
             raise ValueError("Select at least one task scope")
@@ -227,7 +233,11 @@ class ChaoxingLearningManager:
                 "account_name": str((payload or {}).get("account_name") or ""),
                 "task_scope": {"learn_chapters": payload.get("learn_chapters", True),
                                "course_homework": payload.get("course_homework", False),
-                               "course_exams": payload.get("course_exams", False)},
+                               "course_exams": payload.get("course_exams", False),
+                               "verify_grades": payload.get("verify_grades", True),
+                               "review_chapter_visits": bool(payload.get("learn_chapters", True)
+                                   and payload.get("review_chapter_visits", False)),
+                               "passing_score": target},
                 "status": "pending",
                 "message": "Task created",
                 "current_task": "preparing",
@@ -625,6 +635,22 @@ class ChaoxingLearningManager:
 
         completed_courses = 0
         failed_courses = 0
+        grade_results = []
+        grade_service = CourseGradeService(chaoxing)
+        verify_grades = payload.get("verify_grades", True)
+        passing_score = float(payload.get("passing_score", 60))
+
+        def checkpoint():
+            if not self._wait_for_resume(task_id, pause_event, stop_event):
+                raise control.QueryCancelled()
+
+        def publish_grade(result):
+            grade_results.append(result)
+            warnings = sum(item.get("state") != "verified" or item.get("meets_target") is False
+                or item.get("review_state") in {"unknown_rule", "unavailable", "unverified", "unconfirmed", "limit_reached"}
+                for item in grade_results)
+            self._update_progress(task_id, grade_results=list(grade_results), grade_warning_count=warnings,
+                                  visit_review=None)
 
         for index, course in enumerate(selected_courses, start=1):
             if stop_event.is_set():
@@ -656,6 +682,15 @@ class ChaoxingLearningManager:
                 (payload.get("course_exams"), "课程考试"),
             ) if enabled]
             self._append_task_log(task_id, "本轮处理范围：" + "、".join(scopes), "info")
+            if verify_grades:
+                initial_grade = grade_service.read(course, passing_score)
+                if initial_grade.get("state") == "verified":
+                    visit = initial_grade["parts"]["visitTime"]
+                    self._append_task_log(task_id,
+                        f"课程【{course_name}】开始前平台总分 {initial_grade['total_score']}；"
+                        f"章节次数 {visit['weighted_score']}/{visit['weight_percent']}。任务点进度与成绩分开核验。", "info")
+                else:
+                    self._append_task_log(task_id, f"课程【{course_name}】考核规则暂未核验，结束后再读取；不猜测成绩。", "warning")
 
             points = []
             chapter_fetch_failed = False
@@ -781,6 +816,29 @@ class ChaoxingLearningManager:
                 if stop_event.is_set():
                     self._cancel_task(task_id, "Task cancelled by user")
                     return
+                if verify_grades:
+                    def review_progress(value):
+                        self._update_task(task_id, current_task="chapter-visits", message="复习章节并核对平台次数分")
+                        self._update_progress(task_id, visit_review=value,
+                            current_chapter=value.get("current_chapter") or "", video_progress=None)
+
+                    grade_result = ChapterVisitReview(chaoxing, grade_service=grade_service).run(
+                        course, points, enabled=bool(payload.get("learn_chapters", True)
+                            and payload.get("review_chapter_visits", False) and not failed_chapters
+                            and not chapter_fetch_failed),
+                        partial=bool(end_point_id), passing_score=passing_score,
+                        checkpoint=checkpoint, progress=review_progress)
+                    publish_grade(grade_result)
+                    if grade_result["state"] == "verified":
+                        self._append_task_log(task_id,
+                            f"课程【{course_name}】平台总分 {grade_result['score']}，参考及格线 {passing_score}；"
+                            f"章节次数 {grade_result['visits_score']}/{grade_result['visits_weight']}。"
+                            + ("已达到参考及格线。" if grade_result["meets_target"] else "尚未达到参考及格线，不自动重做作业或考试。")
+                            + grade_result.get("message", ""),
+                            "info" if grade_result["meets_target"] else "warning")
+                    else:
+                        self._append_task_log(task_id, f"课程【{course_name}】平台成绩未核验，不将任务点完成当作及格。", "warning")
+                checkpoint()
                 if failed_chapters or assessment_failed or chapter_fetch_failed:
                     failed_courses += 1
                     self._append_task_log(
@@ -794,6 +852,9 @@ class ChaoxingLearningManager:
                 else:
                     completed_courses += 1
                     self._append_task_log(task_id, f"Course completed: {course_name}", "success")
+            except control.QueryCancelled:
+                self._cancel_task(task_id, "Task cancelled by user")
+                return
             except Exception as exc:
                 failed_courses += 1
                 self._append_task_log(task_id, f"课程【{course_name}】执行异常：{diagnostic_reason(exc)}", "error")
@@ -820,14 +881,17 @@ class ChaoxingLearningManager:
             )
             self._append_task_log(task_id, "Task finished with failures", "warning")
         else:
-            summary = "Task completed"
+            warning_count = sum(item.get("state") != "verified" or item.get("meets_target") is False
+                or item.get("review_state") in {"unknown_rule", "unavailable", "unverified", "unconfirmed", "limit_reached"}
+                for item in grade_results)
+            summary = (f"任务点处理结束；{warning_count}门课程成绩或次数需核对" if warning_count else "Task completed")
             self._update_task(
                 task_id,
                 status="completed",
                 message=summary,
                 current_task="finished",
             )
-            self._append_task_log(task_id, "Task completed", "success")
+            self._append_task_log(task_id, summary, "warning" if warning_count else "success")
 
         self._send_completion_notification(task_id, notify_config, summary)
 

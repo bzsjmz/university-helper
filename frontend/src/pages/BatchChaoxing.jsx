@@ -190,6 +190,9 @@ export default function BatchChaoxing({ accounts, tasks, config, refreshTasks, o
         review[0]?.payload.course_homework && '课程作业（整个所选课程）',
         review[0]?.payload.course_exams && '课程考试（整个所选课程）',
       ].filter(Boolean).join('、')}</p>
+      <p className="my-2 text-sm">逐课核验平台成绩 · 参考及格线 {review[0]?.payload.passing_score ?? 60} 分
+        {review[0]?.payload.review_chapter_visits && ' · 整课学习时补齐计分章节次数（部分章节任务不扩展范围）'}
+      </p>
       <p className="my-2 text-sm">{review[0]?.payload.speed} 倍速 · 每账号 {review[0]?.payload.concurrency} 章节并发 · {review[0]?.payload.tiku_config.provider.split(',').filter(Boolean).map(name => PROVIDERS[name] || name).join(' → ') || '未启用题库'}</p>
       <p className="mb-3 text-xs text-text-muted">本地缓存始终优先查询。缓存未命中时，AI 作答可能产生费用。</p>
       <ul className="space-y-3">{review.map(item => <li key={item.account.id}>

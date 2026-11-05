@@ -4,6 +4,7 @@ import { ArrowRight, BookOpen, CheckCircle, GraduationCap, RefreshCw, Trash2 } f
 import { Card, StatusBadge } from '../components'
 import { api } from '../utils/api'
 import TaskControlSection from './chaoxing-fanya/components/TaskControlSection'
+import CourseGradeResults from './chaoxing-fanya/components/CourseGradeResults'
 import LogSection from './chaoxing-fanya/components/LogSection'
 import { normalizeCourseText, toNum } from './chaoxing-fanya/utils'
 
@@ -239,6 +240,7 @@ export default function TaskConsole() {
               作业／考试：已提交 {toNum(progress.assessments_submitted)} · 已保存 {toNum(progress.assessments_saved)} · 已跳过 {toNum(progress.assessments_skipped)} · 未完成 {toNum(progress.assessments_failed)}
             </p>}
             <p className="mt-3 text-xs text-text-muted">失败课程 {toNum(progress.failed)} · 更新 {time(task.updated_at)}</p>
+            <CourseGradeResults progress={progress} compact />
             <p className="mt-1 truncate text-xs text-text-muted" title={task.task_id}>任务 {task.task_id}</p>
             <div className="mt-4 flex flex-wrap gap-2">
               <button type="button" onClick={() => { setSelectedId(task.task_id); detailRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }); detailRef.current?.focus({ preventScroll: true }) }} className="rounded-lg bg-primary/10 px-3 py-2 text-sm text-primary">查看详情</button>

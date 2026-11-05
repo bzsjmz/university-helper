@@ -427,7 +427,10 @@ def serve() -> None:
 
 
 if __name__ == "__main__":
-    if sys.argv[1:] == ["--english-worker"]:
+    if sys.argv[1:] == ["--chaoxing-visit-worker"]:
+        from app.services.course.chaoxing.native_visit_worker import main as visit_worker_main
+        visit_worker_main()
+    elif sys.argv[1:] == ["--english-worker"]:
         from app.services.course.english.worker import main as worker_main
         worker_main()
     elif sys.argv[1:] == ["--desktop-probe"]:

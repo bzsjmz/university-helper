@@ -31,3 +31,14 @@ test('chapter concurrency can be typed above the former maximum', async () => {
   fireEvent.blur(input)
   expect(input).toHaveValue(1)
 })
+
+test('new tasks verify grades and supplement only chapter learning scopes', () => {
+  render(<Config />)
+  const review = screen.getByRole('checkbox', { name: '补齐计分的章节学习次数' })
+  expect(review).toBeChecked()
+  expect(screen.getByRole('spinbutton', { name: '成绩参考及格线' })).toHaveValue(60)
+  fireEvent.click(screen.getByRole('checkbox', { name: '章节学习（含章节测试）' }))
+  expect(review).toBeDisabled()
+  fireEvent.click(screen.getByRole('checkbox', { name: '章节学习（含章节测试）' }))
+  expect(review).toBeEnabled()
+})

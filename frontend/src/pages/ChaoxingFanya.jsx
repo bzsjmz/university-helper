@@ -185,6 +185,9 @@ export function LegacyChaoxingFanya() {
         body: JSON.stringify({
           platform: 'chaoxing',
           learn_chapters: taskConfig.learnChapters,
+          verify_grades: true,
+          review_chapter_visits: taskConfig.learnChapters && taskConfig.reviewChapterVisits,
+          passing_score: taskConfig.passingScore,
           course_homework: taskConfig.courseHomework,
           course_exams: taskConfig.courseExams,
           username: auth.username.trim(),

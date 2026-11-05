@@ -226,3 +226,51 @@ def test_course_without_chapters_still_runs_enabled_assessments(worker, monkeypa
     assert task['status'] == 'failed'
     assert task['progress']['failed'] == 1
     assert task['progress']['assessments_failed'] == 1
+
+
+@pytest.mark.parametrize('state,score', [('verified', 45), ('unverified', None)])
+def test_grade_warning_does_not_fail_task_or_trigger_assessment_retry(worker, monkeypatch, state, score):
+    calls = []
+    class Review:
+        def __init__(self, *args, **kwargs):
+            pass
+        def run(self, course, points, **kwargs):
+            calls.append(kwargs)
+            result = {'course_name': course['title'], 'state': state, 'review_state': 'unverified'}
+            if state == 'verified':
+                result.update(score=score, meets_target=False, visits_score=2, visits_weight=20)
+            return result
+    monkeypatch.setattr(lm, 'ChapterVisitReview', Review)
+    task, _ = worker(course_ids=['100_200_300'], review_chapter_visits=True)
+    assert task['status'] == 'completed'
+    assert task['progress']['grade_warning_count'] == 1
+    assert task['progress']['grade_results'][0]['state'] == state
+    assert len(calls) == 1 and calls[0]['enabled'] is True
+
+
+def test_partial_scope_is_explicit_in_grade_review(worker, monkeypatch):
+    calls = []
+    class Review:
+        def __init__(self, *args, **kwargs):
+            pass
+        def run(self, course, points, **kwargs):
+            calls.append((points, kwargs))
+            return {'state': 'unverified', 'review_state': 'unverified'}
+    monkeypatch.setattr(lm, 'ChapterVisitReview', Review)
+    task, _ = worker(course_ids=['100_200_300'], chapter_limits={'100_200_300': 'p2'}, review_chapter_visits=True)
+    assert task['status'] == 'completed'
+    assert calls[0][1]['partial'] is True
+    assert [p['id'] for p in calls[0][0]] == ['p1', 'p2']
+
+
+def test_old_internal_payload_does_not_enable_native_review(worker, monkeypatch):
+    calls = []
+    class Review:
+        def __init__(self, *args, **kwargs):
+            pass
+        def run(self, course, points, **kwargs):
+            calls.append(kwargs)
+            return {'state': 'unverified', 'review_state': 'unverified'}
+    monkeypatch.setattr(lm, 'ChapterVisitReview', Review)
+    worker(course_ids=['100_200_300'])
+    assert calls[0]['enabled'] is False

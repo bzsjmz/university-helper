@@ -153,7 +153,10 @@ def restart_saved_task(task_id: str, owner: str, *, automatic=False, now=None, s
         if current_account != account_id or not ciphertext:
             raise HTTPException(409, 'Old task has no saved configuration; select courses and settings again')
         try:
-            request = AccountTask.model_validate(json.loads(decrypt_str(ciphertext)))
+            saved = json.loads(decrypt_str(ciphertext))
+            # Old restart records must not silently acquire native browsing.
+            saved.setdefault("review_chapter_visits", False)
+            request = AccountTask.model_validate(saved)
         except Exception:
             raise HTTPException(409, 'Saved configuration unavailable; select courses and settings again') from None
         if not request.course_ids or len(request.course_ids) > 100:
