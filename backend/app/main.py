@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.v1 import auth, chaoxing, learning_accounts, english_learning
 from app.api.v1 import welearn
+from app.api.v1 import zhihuishu_managed
 from app.api.v1.course import cancel_all_qr_sessions, cleanup_expired_entries
 from app.api.v1.metrics import record_request
 from app.api.v1.metrics import router as metrics_router
@@ -73,6 +74,7 @@ async def _periodic_cleanup_loop() -> None:
     while True:
         try:
             cleanup_expired_entries()
+            zhihuishu_managed.zhihuishu_manager.cleanup()
             english_learning.english_manager.cleanup()
         except Exception:
             logger.exception("cleanup_expired_entries iteration failed")
@@ -121,6 +123,7 @@ async def lifespan(app: FastAPI):
     # Fail fast at startup if the credential cipher cannot be initialized
     # (in production this raises when CREDENTIAL_ENCRYPTION_KEY is missing).
     init_cipher()
+    await asyncio.to_thread(zhihuishu_managed.zhihuishu_manager.recover)
     # Opt-in OTel tracing when OTEL_EXPORTER_OTLP_ENDPOINT is set.
     configure_tracing(app)
     app.state.cleanup_task = asyncio.create_task(_periodic_cleanup_loop())
@@ -148,6 +151,7 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        await asyncio.to_thread(zhihuishu_managed.zhihuishu_manager.shutdown)
         await asyncio.to_thread(welearn.welearn_workbench.shutdown)
         await asyncio.to_thread(english_learning.english_manager.shutdown)
         bootstrap_stop.set()
@@ -340,6 +344,7 @@ app.include_router(
 from app.api.v1 import course
 
 app.include_router(course.router, prefix="/api/v1/course", tags=["course"])
+app.include_router(zhihuishu_managed.router, prefix="/api/v1/course/zhihuishu/managed", tags=["zhihuishu"])
 app.include_router(chaoxing.router, prefix="/api/v1/chaoxing", tags=["chaoxing"])
 app.include_router(learning_accounts.router, prefix="/api/v1/learning-accounts", tags=["learning-accounts"])
 app.include_router(english_learning.router, prefix="/api/v1/english-learning", tags=["english-learning"])

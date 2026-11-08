@@ -60,6 +60,7 @@ class ZhihuishuAdapter:
         self._task_lock = threading.Lock()
         self._task_state: dict[str, Any] | None = None
         self._tasks: dict[str, dict[str, Any]] = {}
+        self._task_threads: dict[str, threading.Thread] = {}
 
     def login_with_qr(
         self,
@@ -259,7 +260,9 @@ class ZhihuishuAdapter:
 
         if total > 0:
             try:
-                threading.Thread(target=self._run_task_loop_guarded, args=(task_id,), daemon=True).start()
+                thread = threading.Thread(target=self._run_task_loop_guarded, args=(task_id,), daemon=True)
+                self._task_threads[task_id] = thread
+                thread.start()
             except Exception as exc:
                 self._mark_task_error(task_id, THREAD_START_FAILURE_MESSAGE)
                 raise RuntimeError(THREAD_START_FAILURE_MESSAGE) from exc
@@ -269,6 +272,10 @@ class ZhihuishuAdapter:
             "status": task_state["status"],
             "progress": self.get_progress(course_id),
         }
+
+    def task_worker_alive(self, task_id: str) -> bool:
+        thread = self._task_threads.get(task_id)
+        return bool(thread and thread.is_alive())
 
     def get_progress(self, course_id: str) -> dict[str, Any]:
         with self._task_lock:

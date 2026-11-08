@@ -68,7 +68,7 @@ class ZhihuishuLearning:
         headers = {"Origin": site, "Referer": site + "/"} if site else None
         return self.session.post(url, data=form, headers=headers, proxies=self.proxies, timeout=10)
 
-    def get_course_list(self) -> list[dict]:
+    def get_course_list(self, *, require_valid_response: bool = False) -> list[dict]:
         """获取共享课列表（onlineservice queryShareCourseInfo）。
 
         ``secretStr`` 明文必须是分页对象 ``{"status","pageNo","pageSize"}``（不是单纯
@@ -87,7 +87,12 @@ class ZhihuishuLearning:
                     key=HOME_KEY,
                     site=ONLINEWEB,
                 )
-                result = _extract(resp.json())
+                payload = resp.json()
+                result = _extract(payload)
+                if require_valid_response and (
+                    resp.status_code != 200 or not isinstance(result.get("courseOpenDtos"), list)
+                ):
+                    raise ValueError("Course response could not verify the login session")
                 total = int(result.get("totalCount") or 0)
                 batch = list(result.get("courseOpenDtos") or [])
                 for page in range(2, math.ceil(total / PAGE_SIZE) + 1):
@@ -97,7 +102,12 @@ class ZhihuishuLearning:
                         key=HOME_KEY,
                         site=ONLINEWEB,
                     )
-                    batch.extend(_extract(resp.json()).get("courseOpenDtos") or [])
+                    page_result = _extract(resp.json())
+                    if require_valid_response and (
+                        resp.status_code != 200 or not isinstance(page_result.get("courseOpenDtos"), list)
+                    ):
+                        raise ValueError("Course response could not verify the login session")
+                    batch.extend(page_result.get("courseOpenDtos") or [])
                 for course in batch:
                     if not isinstance(course, dict):
                         continue
@@ -268,6 +278,8 @@ class ZhihuishuLearning:
                         # 服务器已记录 >= 本次上报：该节已学满/被其他端推进，视为完成。
                         return True
                     if code not in (0, 200, None):
+                        logger.warning("Zhihuishu rejected progress report: code=%s",
+                                       code if isinstance(code, (int, float)) else "unexpected_type")
                         return False
                     last_submit = played
                     watch_point.reset(int(played))
