@@ -45,6 +45,25 @@ def _extract(payload: dict) -> dict:
     return {}
 
 
+def _course_page(payload: dict, http_status: int, *, strict: bool) -> dict:
+    result = _extract(payload)
+    if not strict:
+        return result
+    # The platform returns courseOpenDtos=null for an empty status bucket.
+    # Accept it only with an explicit successful response and zero total;
+    # missing data, nonzero totals and login/error responses still fail closed.
+    total = result.get("totalCount")
+    if (http_status != 200 or not isinstance(payload, dict) or payload.get("code") != 200
+            or type(total) is not int or total < 0 or "courseOpenDtos" not in result):
+        raise ValueError("Course response could not verify the login session")
+    items = result["courseOpenDtos"]
+    if items is None and total == 0:
+        return {**result, "courseOpenDtos": []}
+    if not isinstance(items, list) or len(items) > total or any(not isinstance(item, dict) for item in items):
+        raise ValueError("Course response could not verify the login session")
+    return result
+
+
 class ZhihuishuLearning:
     """智慧树自动学习服务"""
 
@@ -88,11 +107,7 @@ class ZhihuishuLearning:
                     site=ONLINEWEB,
                 )
                 payload = resp.json()
-                result = _extract(payload)
-                if require_valid_response and (
-                    resp.status_code != 200 or not isinstance(result.get("courseOpenDtos"), list)
-                ):
-                    raise ValueError("Course response could not verify the login session")
+                result = _course_page(payload, getattr(resp, "status_code", 200), strict=require_valid_response)
                 total = int(result.get("totalCount") or 0)
                 batch = list(result.get("courseOpenDtos") or [])
                 for page in range(2, math.ceil(total / PAGE_SIZE) + 1):
@@ -102,11 +117,7 @@ class ZhihuishuLearning:
                         key=HOME_KEY,
                         site=ONLINEWEB,
                     )
-                    page_result = _extract(resp.json())
-                    if require_valid_response and (
-                        resp.status_code != 200 or not isinstance(page_result.get("courseOpenDtos"), list)
-                    ):
-                        raise ValueError("Course response could not verify the login session")
+                    page_result = _course_page(resp.json(), getattr(resp, "status_code", 200), strict=require_valid_response)
                     batch.extend(page_result.get("courseOpenDtos") or [])
                 for course in batch:
                     if not isinstance(course, dict):

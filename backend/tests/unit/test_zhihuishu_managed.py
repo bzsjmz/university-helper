@@ -380,3 +380,37 @@ def test_actual_app_startup_recovers_queues_and_serves_authenticated_accounts(ma
         assert response.status_code == 200
         assert response.json()['data'][0]['account_id'] == row['account_id']
         assert manager.list_queues('owner-a')[0]['status'] == 'interrupted'
+
+
+def test_real_course_response_with_no_completed_courses_keeps_valid_login():
+    from app.services.course.zhihuishu.learning import ZhihuishuLearning
+    from types import SimpleNamespace
+    learning = ZhihuishuLearning({})
+    def post(url, payload, **kwargs):
+        result = {'totalCount': 4, 'courseOpenDtos': [{'courseId': str(n)} for n in range(4)]} if payload['status'] == 0 else {
+            'totalCount': 0, 'courseOpenDtos': None}
+        return SimpleNamespace(status_code=200, json=lambda: {'code': 200, 'result': result})
+    learning._signed_post = post
+    assert len(learning.get_course_list(require_valid_response=True)) == 4
+
+
+@pytest.mark.parametrize('code,http,result', [
+    (401,200,{'totalCount':0,'courseOpenDtos':None}),
+    (200,401,{'totalCount':0,'courseOpenDtos':None}),
+    (200,200,{'totalCount':4,'courseOpenDtos':None}),
+    (200,200,{'totalCount':0}),
+    (200,200,{}),
+    (200,200,{'totalCount':'0','courseOpenDtos':None}),
+    (200,200,{'totalCount':False,'courseOpenDtos':None}),
+    (200,200,{'totalCount':0,'courseOpenDtos':{}}),
+])
+def test_empty_course_tolerance_does_not_accept_unknown_or_expired_login(code,http,result):
+    from app.services.course.zhihuishu.learning import _course_page
+    with pytest.raises(ValueError):
+        _course_page({'code':code,'result':result},http,strict=True)
+
+
+def test_valid_empty_course_bucket_can_be_null_or_array():
+    from app.services.course.zhihuishu.learning import _course_page
+    for items in (None,[]):
+        assert _course_page({'code':200,'result':{'totalCount':0,'courseOpenDtos':items}},200,strict=True)['courseOpenDtos']==[]
