@@ -360,6 +360,49 @@ def test_api_requires_auth_and_validates_selections(manager, monkeypatch):
     assert client.get('/accounts/unknown/courses').status_code == 404
 
 
+def test_valid_multi_course_request_starts_queue_through_api(manager, monkeypatch):
+    import app.api.v1.zhihuishu_managed as api
+    from app.dependencies import get_current_user_id
+    monkeypatch.setattr(api, 'zhihuishu_manager', manager)
+    row = account(manager)
+    watched = []
+    configure(manager, row, watch=lambda video, **kwargs: watched.append(video['course_id']) or True)
+    app = FastAPI()
+    app.include_router(api.router)
+    app.dependency_overrides[get_current_user_id] = lambda: 'owner-a'
+    with TestClient(app) as client:
+        response = client.post('/accounts/' + row['account_id'] + '/queue', json={
+            'courses': [{'course_id': 'one', 'end_chapter_id': 'chapter'}, {'course_id': 'two'}],
+            'speed': 2, 'task_type': 'ai-course', 'auto_answer': True})
+    assert response.status_code == 200
+    queue = wait_queue(manager, response.json()['data']['task_id'])
+    assert queue['status'] == 'completed'
+    assert watched == ['one', 'two']
+    assert queue['speed'] == 2
+    assert queue['task_type'] == 'ai-course'
+    assert queue['courses'][0]['end_chapter_id'] == 'chapter'
+    assert manager.list_queues('owner-b') == []
+
+
+def test_unexpected_api_error_logs_only_operation_and_exception_class(manager, monkeypatch, caplog):
+    import app.api.v1.zhihuishu_managed as api
+    from app.dependencies import get_current_user_id
+    monkeypatch.setattr(api, 'zhihuishu_manager', manager)
+    def broken(owner):
+        raise RuntimeError('Cookie=private_session_value https://example.com/?secret=do_not_log')
+    monkeypatch.setattr(manager, 'accounts', broken)
+    app = FastAPI()
+    app.include_router(api.router)
+    app.dependency_overrides[get_current_user_id] = lambda: 'owner-a'
+    response = TestClient(app).get('/accounts')
+    assert response.status_code == 503
+    assert 'RuntimeError' in caplog.text
+    assert 'broken' in caplog.text
+    for secret in ('private_session_value', 'do_not_log', 'https://example.com'):
+        assert secret not in caplog.text
+        assert secret not in response.text
+
+
 def test_actual_app_startup_recovers_queues_and_serves_authenticated_accounts(manager, monkeypatch):
     import app.main as main
     import app.api.v1.zhihuishu_managed as managed_api

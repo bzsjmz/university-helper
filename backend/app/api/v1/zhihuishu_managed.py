@@ -1,5 +1,6 @@
 """Managed Zhihuishu APIs. Credentials never appear in public responses."""
 import asyncio
+import logging
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -9,6 +10,7 @@ from app.dependencies import get_current_user_id
 from app.services.course.zhihuishu.managed import ManagedError, zhihuishu_manager
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 async def call(func, *args, **kwargs):
@@ -17,7 +19,11 @@ async def call(func, *args, **kwargs):
         return {"status": "success", "data": result}
     except ManagedError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
-    except Exception:
+    except Exception as exc:
+        # Keep operation/class for diagnostics; never log args or exception text
+        # which may contain passwords, cookies or signed platform URLs.
+        logger.error("Managed Zhihuishu operation failed: operation=%s exception=%s",
+                     getattr(func, "__name__", type(func).__name__), type(exc).__name__)
         raise HTTPException(status_code=503, detail="智慧树服务暂不可用，请稍后重试。") from None
 
 
@@ -103,7 +109,9 @@ async def videos(account_id: str, course_id: str, owner: str = Depends(get_curre
 
 @router.post("/accounts/{account_id}/queue")
 async def start_queue(account_id: str, request: QueueStart, owner: str = Depends(get_current_user_id)):
-    return await call(zhihuishu_manager.start_queue, owner, account_id, **request.model_dump())
+    payload = request.model_dump()
+    selections = payload.pop("courses")
+    return await call(zhihuishu_manager.start_queue, owner, account_id, selections, **payload)
 
 
 @router.get("/queues")
